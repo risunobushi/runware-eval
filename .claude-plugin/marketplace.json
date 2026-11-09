@@ -10,14 +10,17 @@
       "source": "./",
       "description": "Set up a re-runnable bench that tells you which Runware model and settings work best for your task, measured on your own inputs.",
       "repository": "https://github.com/risunobushi/runware-eval",
-      "keywords": ["runware", "eval", "benchmark", "model comparison", "fidelity", "testing"],
-      "skills": ["./skills/"],
-      "mcpServers": {
-        "runware": {
-          "type": "http",
-          "url": "https://mcp.runware.ai"
-        }
-      },
+      "keywords": [
+        "runware",
+        "eval",
+        "benchmark",
+        "model comparison",
+        "fidelity",
+        "testing"
+      ],
+      "skills": [
+        "./skills/"
+      ],
       "strict": false
     }
   ]

@@ -18,25 +18,25 @@ of good. The agent's job is setup and judgement. Execution belongs to the runner
 **Core rule: the user decides what "good" means; the catalog decides what is possible.** Never pick
 metrics before asking, and never claim what a model can or cannot do without reading its schema.
 
-## Step 0 — Preflight: Runware MCP, Runware CLI and uv, before anything else
+## Step 0 — Preflight: Runware CLI and uv, before anything else
 
-The bench needs all three, every time. Check them before any other step, including the
-existing-bench question, and do not continue until all are ready. Do not substitute guessed REST calls, web
+The bench needs both, every time. Check them before any other step, including the existing-bench
+question, and do not continue until both are ready. Do not substitute guessed REST calls, web
 searches, or model knowledge from memory.
 
-- **Runware MCP**: catalog discovery, schemas, pricing and the smoke round.
-- **Runware CLI**: uploads local files at full size (the hosted MCP runs on Runware's servers and
-  cannot read them), and gives the runner its login (the MCP's browser sign-in does not extend to
-  scripts).
+- **Runware CLI**: the catalog (search, schemas, pricing, examples), uploads of local files at full
+  size, and the login the runner uses. One sign-in covers everything.
 - **uv**: runs the bench runner in its own isolated environment, on a pinned Python 3.12 that uv
   downloads if needed. Nothing is installed into the user's Python (they need none), so no admin
   rights, PATH changes or dependency clashes.
+
+No MCP server is needed: every catalog question goes through the CLI, and the runner does the paid
+work. Both work in any agent with a shell, and nothing needs a restart.
 
 ### 1. Check both (read-only)
 
 | | Ready when | Otherwise |
 |---|---|---|
-| MCP | Tools such as `list_models`, `model_schema`, `run` exist in this session (e.g. `mcp__runware__list_models`) | `claude mcp list` shows `runware`: added, not connected or signed in. Not listed: missing. |
 | CLI | `runware auth status` prints a table whose `Status` row is `valid` | Command not found: missing. Any other `Status` value (e.g. `not configured`): installed, not signed in. |
 | uv | `uv --version` prints a version | Command not found: missing. |
 
@@ -45,49 +45,43 @@ Show the user this status in two lines, then fix what is missing.
 
 ### 2. Install what is missing, yourself (the user approves each command)
 
-Install the CLI and uv first: neither needs a restart or admin rights. Then the MCP.
+Neither needs a restart or admin rights.
 
 - **CLI**
   - Windows with scoop: `scoop bucket add runware https://github.com/Runware/scoop-bucket.git` then
-    `scoop install runware`. Without scoop, ask whether to install scoop first.
+    `scoop install runware` (adding a bucket needs git: `scoop install git` first if it is missing).
+    Without scoop, ask whether to install scoop first.
   - macOS: `brew install --cask runware/tap/runware`
   - Linux: `curl -fsSL https://cli.runware.ai/install.sh | sh`
-  - If `runware` is still not found, call it by its full path (e.g. `~/scoop/shims/runware`).
-- **uv** (user-level installers, no admin)
+- **uv**
   - Windows: `scoop install uv`, or without scoop
     `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
   - macOS: `brew install uv`
   - Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **MCP** (Claude Code): `claude mcp add --transport http runware https://mcp.runware.ai`. Skip the
-  add if `claude mcp list` already shows it. Other clients, or no shell: give the user the URL
-  `https://mcp.runware.ai` and where it goes in that client's MCP settings.
 
-### 3. One message with everything only the user can do, in this order
+If a freshly installed command is not found, call it by its full path (e.g. `~/scoop/shims/runware`)
+rather than asking for a restart. If an install fails, show the user the error and stop there.
 
-Include only the steps that apply:
+### 3. The one step only the user can do
 
-1. **CLI sign-in:** in a **separate terminal**, run `runware auth login` and paste the API key at the
-   prompt (runware.ai → dashboard → API keys). Never ask for the key in the chat; never use `--key`.
-2. **Reload for the MCP** (only if you added it in this session; `/mcp` will not list it yet):
-   `/exit`, then `claude -c` in the same folder. It reopens this conversation.
-3. **MCP sign-in:** `/mcp` → **runware** → **Authenticate**, and sign in in the browser.
-4. Say "continue".
+If the CLI is not signed in: ask them to open a **separate terminal**, run `runware auth login` and
+paste their API key at the prompt (runware.ai → dashboard → API keys), then say "continue". Never ask
+for the key in the chat; never use `--key`.
 
 While they do this, ask one thing, so the wait is not wasted: if the folder already has a bench, the
 existing-bench question below; otherwise Step 1 question 1 (goal and inputs). Nothing else.
 
-### 4. Re-check both
+### 4. Re-check
 
-When they say continue, run the checks in part 1 again. Proceed only when all three are ready.
+When they say continue, run the checks in part 1 again. Proceed only when both are ready.
 
 Urgency ("I'm in a hurry", "just get going") is not declining. Only if the user explicitly declines
-the MCP: read the public catalog at `https://runware.ai/docs/models/index.json` and each model's
-`schema` URL, and say the bench is in read-only mode. Only if they decline the CLI: use public URLs
-they already host, or inline base64 through the MCP for a single small image (it fills the
-conversation and forces downscaling). Never ask for a `.env` file.
+the CLI: read the public catalog (`https://runware.ai/docs/models/index.json` and each model's
+`schema` URL) and say the bench can be designed but not run until they sign in. Never ask for a
+`.env` file.
 
-Upload local inputs with `runware media upload <file> -F json` and use the returned `mediaUUID` in
-MCP calls and in `bench.yaml`.
+The runner uploads local inputs itself (once, through the CLI) and records their URLs; nothing to do
+by hand.
 
 ## Existing benches: mention, then ask
 
@@ -157,19 +151,34 @@ unchanged output must fail) or `info`. Then:
    itself; a control that goes the wrong way means the metric or its threshold is broken.
 3. Never edit the runner's library to add a bench-specific metric.
 
-## Step 3 — Find candidates through the MCP
+## Step 3 — Find candidates in the catalog
 
 These are free, read-only calls: you may start them as soon as the dimensions are confirmed, in
-parallel with metric sign-off. Propose recipes only after sign-off.
+parallel with metric sign-off. Propose recipes only after sign-off. Add `-F json`, and keep stderr
+out of what you parse (`2>/dev/null`): a `Showing N of M results` footer goes there.
 
-1. `list_capabilities`, then `list_models` filtered by the capability the goal needs
-   (e.g. `edit`, `image-to-image`). Keep `live` models only.
-2. `model_schema` for each. Read `x-modes` to keep only models that accept the inputs the goal needs
-   (e.g. `seedImage + maskImage`). **Read field descriptions**, not just names: preservation
-   behaviour, quality tiers and mask conventions live in prose.
-3. `model_pricing` for each, and for every price tier.
-4. Propose 6–10 **recipes**, not just models: include quality tiers, prompt variants and mask
-   variants of strong candidates. A cheap tier of a good model is a real contender.
+1. **Search:** `runware model search --source official --capabilities <cap> --limit 100`. Tags are
+   `io:<from>-to-<to>` (e.g. `io:image-to-video`, `io:image-to-3d`) and `op:<operation>` (e.g.
+   `op:edit`, `op:inpaint`); repeat `--capabilities` to combine. If unsure of a tag, search without
+   it and read the results' `capabilities`. The default limit is 20 and truncates silently.
+2. **Status and price:** `runware model pricing <air> -F json` gives `status` (keep `live` only) and
+   the model's slug (`model`). It only lists a few example configurations; the real rates per unit
+   and tier are in the public schema, `info.x-pricing.rates`. Drop any model whose pricing or schema
+   call fails, even if search lists it.
+3. **Schema:** `runware model schema <air> -F json` (`requestSchema.properties`): input media under
+   `inputs`, model options under `settings` and `providerSettings.<provider>`. Use only these fields,
+   with their exact names, and **read their descriptions**: preservation behaviour, quality tiers and
+   mask conventions live in prose. Accepted input combinations are `info.x-modes` in the public
+   schema, `https://runware.ai/docs/models/<slug>/schema.json` (the slug, not the AIR; fetch with
+   curl, as some clients are refused). `runware model examples <air> -F json` shows a real request
+   when the shape is unclear.
+4. **Defaults that change cost or results:** note them per recipe and set them deliberately. Seen so
+   far: audio on by default (costs more), prompt rewriting on by default (`promptExtend`,
+   `promptUpsampling`, `enhancePrompt`: hurts reproducibility), fixed duration steps or minimums, and
+   quality or speed modes.
+5. **Propose recipes, not just models:** quality tiers, prompt variants and mask variants of strong
+   candidates; a cheap tier of a good model is a real contender. Size the list to the budget:
+   recipes x inputs x seeds x price must fit the cap for the full run, not just the smoke round.
 
 ## Step 4 — Normalise and write the bench
 
@@ -235,20 +244,20 @@ mis-specified: fix or demote it, and say so in the caveats.
 |---|---|
 | "I already know the right metrics for this" | Ask first. Another user with the same inputs may care about different things. |
 | "No model can preserve pixels, so I'll build a workaround" | Read the schemas first. Some models restore unchanged pixels by design. |
-| "I'll search the community catalog for edit models" | `model_search` is community fine-tunes. Use `list_models` by capability. |
+| "I'll search the whole catalog for edit models" | Without `--source official` the search includes community fine-tunes. Filter by source and capability. |
 | "I'll write custom scripts for this user" | Write `bench.yaml`. A one-off script is not a bench. |
-| "I'll loop `run` over the whole grid in chat" | The MCP is for setup and the smoke round. The runner executes. |
+| "I'll loop single API calls over the whole grid in chat" | The runner executes, with caching, budget and cost records. |
 | "I'll dry-run it to get a free price" | Dry-run is unreliable on Runware. Estimate from measured smoke costs, and say which numbers are listed. |
-| "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
-| "Inputs are URLs / already uploaded, so I can skip one of the three" | Step 0 needs all three every time: the runner uses the CLI login and runs through uv. |
+| "I'll write the request from memory" | Read the model's schema with `runware model schema` first. Field names differ per model. |
+| "Inputs are URLs / already uploaded, so I can skip one of the two" | Step 0 needs both every time: the runner uses the CLI login and runs through uv. |
 | "I'll add this check to the runner's code" | Write it in the bench's `metrics/` folder, show it, run the controls. |
 | "The numbers look plausible, so the checks work" | Run `metrics control` and look at the outputs. Plausible numbers hid three broken checks in testing. |
 | "I'll put the recipes inline in bench.yaml" | One file per recipe in `recipes/`, so they can be shared and matched by fingerprint. |
 | "I'll `pip install` the runner" | Never into the user's Python. Run it through uv. |
-| "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
+| "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in. |
 | "I'll ask for the key so I can run `runware auth login --key`" | Never. The user signs in at the CLI prompt in their own terminal. |
 | "There's already a bench for this; I'll pick up where it left off" | Mention it and ask. A new request is a new bench unless the user says otherwise. |
-| "Local files: I'll base64 them into the MCP call" | Install the CLI and upload at full size. Inline is a last resort for one small image. |
+| "I'll install the Runware MCP too" | Not needed: the CLI covers the catalog and the runner does the work. One sign-in, no restart. |
 
 ## Quality bar
 

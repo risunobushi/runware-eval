@@ -10,32 +10,33 @@ new model ships.
 
 ## Install
 
-**Claude Code** (plugin, includes the Runware MCP):
+**Claude Code** (plugin):
 
 ```
 /plugin marketplace add risunobushi/runware-eval
 /plugin install eval@runware-eval
 ```
 
-**Any other agent:** copy `skills/runware-eval/` to where your agent loads skills
-(`.claude/skills/`, `.cursor/skills/`, `.agents/skills/`), then connect the Runware MCP:
+**Any other agent with a shell:** copy `skills/runware-eval/` to where your agent loads skills
+(`.claude/skills/`, `.cursor/skills/`, `.agents/skills/`).
 
-```
-claude mcp add --transport http runware https://mcp.runware.ai
-```
+The skill sets up the two tools it needs on first use, with no admin rights and no restart: the
+[Runware CLI](https://github.com/runware/runware-cli) (catalog, uploads, and the one sign-in:
+`runware auth login`) and [uv](https://docs.astral.sh/uv/) (runs the bench runner in its own
+environment). No MCP server is needed.
 
 ## Use
 
 Ask your agent something like *"Which Runware model is best for adding a contact shadow without
 changing my product?"* The skill will:
 
-1. check that the Runware MCP is connected, and help you install it if not;
+1. check the Runware CLI and uv, install what is missing, and ask you to sign in once;
 2. ask what you want to evaluate (deviation, pixel shift, identity, text, prompt adherence,
    aesthetics, technical quality), with cost and latency always measured;
-3. pick metrics for those dimensions from `references/metrics.md`;
-4. find candidate models through the MCP and read their schemas;
-5. write `bench.yaml` (format in `references/bench-format.md`) and estimate the cost;
-6. run a one-input smoke round before anything bigger.
+3. pick metrics from the library (`references/metric-catalog.md`), or write a new one with you;
+4. find candidate models in the catalog with the CLI and read their schemas;
+5. write `bench.yaml` and one file per recipe, and estimate the cost;
+6. run a smoke round, then the full run, and hand you a single HTML report.
 
 ## Runner
 
