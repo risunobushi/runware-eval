@@ -40,14 +40,15 @@ changing my product?"* The skill will:
 ## Runner
 
 ```
-pip install -e runner                      # needs the Runware CLI signed in (`runware auth login`)
-runware-eval estimate bench.yaml --round smoke
-runware-eval run      bench.yaml --round smoke      # first input, first seed, every recipe
-runware-eval run      bench.yaml --round full       # everything, stops before passing the budget
-runware-eval report   bench.yaml --round full --notes notes.json
+pip install --no-deps -e runner            # needs the Runware CLI signed in (`runware auth login`)
+python -m runware_eval estimate bench.yaml --round smoke
+python -m runware_eval run      bench.yaml --round smoke      # first input, first seed, every recipe
+python -m runware_eval run      bench.yaml --round full       # everything, stops before passing the budget
+python -m runware_eval report   bench.yaml --round full --notes notes.json
 ```
 
-Results are cached per task, so re-running only pays for what is new. Each run folder ends with a
+`python -m runware_eval` works without admin rights; the `runware-eval` shortcut needs write
+access to Python's `Scripts` folder. Results are cached per task, so re-running only pays for what is new. Each run folder ends with a
 single `report.html`.
 
 ## License

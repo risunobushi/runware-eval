@@ -164,21 +164,24 @@ re-runnable later without an agent, and adding a new model must mean adding one 
 
 ## Step 5 — Cost, smoke round, full run, report
 
-The runner does the paid work. Install it once from this repo: `pip install -e runner` (if the
-`runware-eval` command is not on PATH, use `python -m runware_eval`). It signs in with the CLI login.
+The runner does the paid work. Install it once from this repo: `pip install --no-deps -e runner`
+(add the listed dependencies if missing). Always call it as `python -m runware_eval …`: it works
+without admin rights, whereas the `runware-eval` shortcut needs write access to Python's `Scripts`
+folder, which system-wide installs often deny. If pip prints "Failed to write executable", the package
+is still installed; only the shortcut is missing. It signs in with the CLI login.
 Every command takes `--out <folder>`; results there are cached, so nothing is ever paid for twice.
 
-1. **Estimate:** `runware-eval estimate bench.yaml --round smoke`. Costs are *measured* averages from
+1. **Estimate:** `python -m runware_eval estimate bench.yaml --round smoke`. Costs are *measured* averages from
    earlier runs in that folder, otherwise the highest *listed* price in the model's schema. Runware has
    no reliable dry-run (the `X-Runware-Dry-Run` header executed and billed in testing), so never
    promise a free price check. Show the user the table and get a yes.
-2. **Smoke round:** `runware-eval run bench.yaml --round smoke` (first input, first seed, every
+2. **Smoke round:** `python -m runware_eval run bench.yaml --round smoke` (first input, first seed, every
    recipe). It records real cost and latency per task, masks every output and writes the report.
    Look at every output for inverted masks, cropping and ignored instructions; fix recipes first.
-3. **Full run:** `runware-eval estimate bench.yaml --round full` (now with measured costs), then, with
-   the user's OK, `runware-eval run bench.yaml --round full`. It stops before starting if the projected
+3. **Full run:** `python -m runware_eval estimate bench.yaml --round full` (now with measured costs), then, with
+   the user's OK, `python -m runware_eval run bench.yaml --round full`. It stops before starting if the projected
    total would pass `budget.max_usd`.
-4. **Report:** `runware-eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
+4. **Report:** `python -m runware_eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
    verdict, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
    region crops, gallery and all data, in one file. Put your reading of the results (what passed, what
    is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
