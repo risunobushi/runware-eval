@@ -28,8 +28,9 @@ searches, or model knowledge from memory.
 - **Runware CLI**: uploads local files at full size (the hosted MCP runs on Runware's servers and
   cannot read them), and gives the runner its login (the MCP's browser sign-in does not extend to
   scripts).
-- **uv**: runs the bench runner in its own isolated environment. Nothing is installed into the
-  user's Python, so no admin rights, PATH changes or dependency clashes.
+- **uv**: runs the bench runner in its own isolated environment, on a pinned Python 3.12 that uv
+  downloads if needed. Nothing is installed into the user's Python (they need none), so no admin
+  rights, PATH changes or dependency clashes.
 
 ### 1. Check both (read-only)
 

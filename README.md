@@ -51,7 +51,10 @@ uv run --project runner runware-eval report   bench.yaml --round full --notes no
 
 Without cloning: `uvx --from "git+https://github.com/risunobushi/runware-eval#subdirectory=runner" runware-eval …`
 
-The first run builds the environment (about a minute); later runs reuse it. Results are cached per
+The runner is pinned to Python 3.12 (`runner/.python-version`) and to exact dependency versions
+(`runner/uv.lock`, which covers Windows, macOS and Linux), so every machine gets the same environment
+and the same metric values. You don't need Python installed: uv downloads 3.12 if it's missing. The
+first run builds the environment (about a minute); later runs reuse it. Results are cached per
 task, so re-running only pays for what is new. Each run folder ends with a single `report.html`.
 
 ## License
