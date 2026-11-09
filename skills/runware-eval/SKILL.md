@@ -38,7 +38,7 @@ work. Both work in any agent with a shell, and nothing needs a restart.
 | | Ready when | Otherwise |
 |---|---|---|
 | CLI | `runware auth status` prints a table whose `Status` row is `valid` | Command not found: missing. Any other `Status` value (e.g. `not configured`): installed, not signed in. |
-| uv | `uv --version` prints a version | Command not found: missing. |
+| uv | `uv --version`, or `~/.runware-eval/tools/uv --version`, prints a version | Neither found: missing. |
 
 Read-only looks at the working folder (e.g. for an existing `bench.yaml`) are fine during this step.
 Show the user this status in two lines, then fix what is missing.
@@ -53,11 +53,12 @@ Neither needs a restart or admin rights.
     Without scoop, ask whether to install scoop first.
   - macOS: `brew install --cask runware/tap/runware`
   - Linux: `curl -fsSL https://cli.runware.ai/install.sh | sh`
-- **uv**
-  - Windows: `scoop install uv`, or without scoop
-    `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-  - macOS: `brew install uv`
-  - Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **uv**: install it self-contained in one folder, without changing PATH or adding an updater
+  (deleting the folder removes it). The installers ask nothing.
+  - macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="$HOME/.runware-eval/tools" sh`
+  - Windows (PowerShell): `$env:UV_UNMANAGED_INSTALL="$HOME\.runware-eval	ools"; powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+  - Then call it as `~/.runware-eval/tools/uv`. If the user already has uv (or prefers `scoop install uv` /
+    `brew install uv`), use that instead.
 
 If a freshly installed command is not found, call it by its full path (e.g. `~/scoop/shims/runware`)
 rather than asking for a restart. If an install fails, show the user the error and stop there.
@@ -203,6 +204,10 @@ instead of writing a near-duplicate. The bench is the deliverable: it must re-ru
 agent, and adding a model must mean adding one recipe file.
 
 ## Step 5 — Cost, smoke round, full run, report
+
+Commands that only read results (`score`, `report`, `label`, `calibrate`, `metrics control`) need no
+Runware login: anyone with the run folder can re-score it and rebuild its report; vision judges then
+use their cached answers. And the report itself is one HTML file anyone can open in a browser.
 
 The runner does the paid work. Do not `pip install` it. Run it through uv, which builds an isolated
 environment on first use (about a minute) and reuses it afterwards:

@@ -283,6 +283,29 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
     return read_results(out_dir)
 
 
+def prepare_offline(b, out_dir):
+    """For commands that only read results (score, report, label, calibrate, metric controls): no uploads.
+    `auto:` masks are taken from the run folder; only a missing one needs a Runware login to generate."""
+    missing = []
+    for inp in b["inputs"]:
+        name = os.path.splitext(os.path.basename(inp["path"]))[0]
+        for rname, spec in (inp.get("regions") or {}).items():
+            if isinstance(spec, str) and spec.startswith("auto:"):
+                target = os.path.join(out_dir, "masks", f"{name}_{rname}.png")
+                if os.path.exists(target):
+                    inp["regions"][rname] = os.path.abspath(target)
+                else:
+                    missing.append(f"{name}:{rname}")
+    if missing:
+        try:
+            api.api_key()
+        except api.RunwareError:
+            raise ValueError(f"Mask(s) {', '.join(missing)} are generated on Runware and not in this run folder yet. "
+                             "Sign in once with `runware auth login`, or give the masks as files in bench.yaml.")
+        benchmod.ensure_media(b, os.path.join(out_dir, "media.lock.json"))
+        ensure_input_masks(b, out_dir)
+
+
 def ensure_input_masks(b, out_dir):
     """Resolve `regions.<name>: auto:<AIR>` into mask files once."""
     for inp in b["inputs"]:

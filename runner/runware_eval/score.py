@@ -253,6 +253,12 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
     log(f"Controls: {len(ctl) - len(bad)}/{len(ctl)} as expected on unchanged inputs"
         + (f"; CHECK THESE: {', '.join(sorted({c['label'] for c in bad}))}" if bad else "."))
     panel = judge_mod.Panel(b.get("judges"), out_dir, log) if judges else None
+    if panel:
+        try:
+            judge_mod.api.api_key()
+        except judge_mod.api.RunwareError:
+            panel.offline = True
+            log("No Runware login: vision judges use cached answers only; new questions are skipped.")
     max_failed = (b.get("judge_when") or {}).get("max_failed_checks", 1)
     recipes_by_id = {r["id"]: r for r in b.get("recipes") or [] if isinstance(r, dict)}
     scored, pending = [], []

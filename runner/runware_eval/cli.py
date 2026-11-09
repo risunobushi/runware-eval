@@ -70,8 +70,7 @@ def cmd_run(a):
 def cmd_score(a, b=None, out=None, results=None):
     if b is None:
         b, out = setup(a)
-        bench.ensure_media(b, os.path.join(out, "media.lock.json"))
-        run.ensure_input_masks(b, out)
+        run.prepare_offline(b, out)
     data = score.score_all(b, out, results if results is not None else run.read_results(out),
                            judges=not getattr(a, "no_judges", False),
                            max_usd=(b.get("budget") or {}).get("max_usd"))
@@ -82,8 +81,7 @@ def cmd_score(a, b=None, out=None, results=None):
 def cmd_report(a, b=None, out=None):
     if b is None:
         b, out = setup(a)
-        bench.ensure_media(b, os.path.join(out, "media.lock.json"))
-        run.ensure_input_masks(b, out)
+        run.prepare_offline(b, out)
     notes = json.load(open(a.notes, encoding="utf8")) if getattr(a, "notes", None) else None
     listed = {r["id"]: api.recipe_price(r) for r in b["recipes"]}
     print("Report →", report.build(b, out, notes, listed))
@@ -102,8 +100,7 @@ def cmd_calibrate(a):
     from . import calibrate
     b, out = setup(a)
     calibrate.run(out, a.labels)
-    bench.ensure_media(b, os.path.join(out, "media.lock.json"))
-    run.ensure_input_masks(b, out)
+    run.prepare_offline(b, out)
     cmd_report(a, b, out)
 
 
@@ -122,8 +119,7 @@ def cmd_metrics(a):
         return
     out = os.path.join(b["_dir"], "runs", "_controls")
     os.makedirs(out, exist_ok=True)
-    bench.ensure_media(b, os.path.join(out, "media.lock.json"))
-    run.ensure_input_masks(b, out)
+    run.prepare_offline(b, out)
     from .score import controls
     rows = controls(b, reg)
     for c in rows:

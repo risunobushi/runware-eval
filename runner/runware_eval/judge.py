@@ -70,6 +70,9 @@ class Panel:
                            .encode()).hexdigest()
         if key in self.cache and self.cache[key]["status"] == "success":
             return self.cache[key]  # failed answers are asked again
+        if getattr(self, "offline", False):
+            return {"key": key, "judge": judge, "status": "error", "answer": None,
+                    "error": "no Runware login (cached answers only)", "cost": 0.0}
         task = {"taskType": "textInference", "taskUUID": str(uuid.uuid4()), "model": judge, "includeCost": True,
                 "messages": [{"role": "user", "content": prompt}], "inputs": {"images": images},
                 "settings": {"temperature": 0, "maxTokens": 4000}}  # reasoning models spend tokens before answering
