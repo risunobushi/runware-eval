@@ -14,7 +14,9 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `evaluate` | The dimensions the user chose. Per dimension: `mode` (`gate` or `rank`) and `metrics` (ids from `metrics.md` with thresholds). |
 | `calibration` | For judge or aesthetic metrics: how many outputs the user labels. |
 | `budget` | `max_usd` for one full run. The runner refuses to start above it. |
-| `seeds` | Seeds per recipe, to measure consistency. |
+| `seeds` | Seeds per recipe in the full run (default `[1, 2, 3]`); the smoke round uses the first. |
+| `pass_rule` | How seeds decide a check, per input: `majority` (default), `all`, `any`. A recipe must pass on every input. |
+| `max_models` | Most distinct models the bench may run (e.g. 3 or 5). The runner refuses more. |
 | `recipes` | Ids of recipe files to run (or `all`). Each file: `id`, `model` (AIR), `params` (exact schema field names), optional `size` and `mask`, `notes` (every convention translated). |
 
 ## Recipes: one file each

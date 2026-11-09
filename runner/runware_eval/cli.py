@@ -89,6 +89,24 @@ def cmd_report(a, b=None, out=None):
     print("Report →", report.build(b, out, notes, listed))
 
 
+def cmd_label(a):
+    from . import label
+    b, out = setup(a)
+    path, n, p = label.build(b, out, pairs_per_recipe=a.pairs_per_recipe)
+    print(f"Labeling page: {path}  ({n} outputs, {p} pairs, blind and shuffled)")
+    print("Open it, label what you can, press 'Download labels.json', then run:")
+    print(f"  runware-eval calibrate {a.bench} --round {a.round} --labels <path to labels.json>")
+
+
+def cmd_calibrate(a):
+    from . import calibrate
+    b, out = setup(a)
+    calibrate.run(out, a.labels)
+    bench.ensure_media(b, os.path.join(out, "media.lock.json"))
+    run.ensure_input_masks(b, out)
+    cmd_report(a, b, out)
+
+
 def cmd_metrics(a):
     from . import catalog
     b = bench.load(a.bench)
@@ -154,6 +172,15 @@ def main():
         if name in ("run", "score"):
             p.add_argument("--no-judges", action="store_true", help="skip the vision-model checks")
         p.set_defaults(fn=fn)
+    lp = sub.add_parser("label", help="make a blind labeling page (good/bad and pairwise) for a scored run")
+    common(lp)
+    lp.add_argument("--pairs-per-recipe", type=int, default=4)
+    lp.set_defaults(fn=cmd_label)
+    cp = sub.add_parser("calibrate", help="read labels.json: agreement per check, suggested thresholds, human ranking")
+    common(cp)
+    cp.add_argument("--labels", required=True, help="the labels.json downloaded from the labeling page")
+    cp.add_argument("--notes")
+    cp.set_defaults(fn=cmd_calibrate)
     mp = sub.add_parser("metrics", help="list metrics (library + bench), run the controls, or print the registry")
     mp.add_argument("action", choices=["list", "control", "markdown"])
     mp.add_argument("bench")

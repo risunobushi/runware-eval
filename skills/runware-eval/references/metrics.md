@@ -86,11 +86,12 @@ is why rubrics are rank-only until calibrated. Measured cost of one combined cal
 |---|---|---|---|---|---|---|---|
 | `aesthetic_predictor` | learned_aesthetic | learned | — | serverless_gpu | score, higher | rank only | planned |
 | `vlm_rubric` | judge | judge | brief | runware_vlm | 1–5, higher | rank only | ready |
-| `pairwise_human` | human | human | labels | local_cpu | Bradley-Terry score | rank only | planned |
+| `pairwise_human` | human | human | labels | labeling page | Bradley-Terry score | rank only | ready (`runware-eval label` / `calibrate`) |
 
-Aesthetics is never a gate until calibrated. The user labels 5–10 outputs good or bad; the report
-shows how often each metric agreed with them. If agreement is below about 70%, rank by blind
-pairwise human comparison instead.
+Aesthetics is never a gate until calibrated. The user labels outputs good or bad on the blind
+labeling page; `calibrate` shows how often each metric agreed (AUC for rank metrics). Below about
+0.7, rank by the blind pairwise human ranking instead. About 20 labels (at least 5 good, 5 bad)
+make suggested thresholds dependable.
 
 ## Technical quality — is it clean?
 

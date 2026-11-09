@@ -121,8 +121,11 @@ it is how users discover dimensions they had not thought of.
 3. **Follow-ups only for the chosen dimensions**: which region must stay fixed (do they have masks,
    or should the bench generate them), expected text, reference identity, and for each dimension
    whether it is a **gate** (must pass) or a **rank** (order the survivors).
-4. **Budget cap** in USD for one full run. Default plan: 1 seed in the smoke round, 2 seeds in the
-   full run if the budget allows (they measure consistency). Say which you chose.
+4. **Budget and size:** the budget cap in USD for one full run, and the **maximum number of models**
+   to test (e.g. 3 or 5; it cuts time and spend). Write it as `max_models` in `bench.yaml` and
+   propose exactly that many in Step 3; the runner refuses more. Seeds: 1 in the smoke round, **3 in
+   the full run** (`seeds: [1, 2, 3]`), so one unlucky or lucky generation does not decide: each
+   check is judged by `pass_rule` (default `majority` of seeds, per input; also `all` or `any`).
 
 ## Step 2 — Pick metrics
 
@@ -135,8 +138,9 @@ what this bench can use. Load `references/metrics.md` for how to choose, then se
 2. Prefer trust order: deterministic > learned > judge > human.
 3. Add one cross-check from a different `family` for every dimension, so disagreement is visible.
 4. Measure pixel shift before deviation (misalignment inflates ΔE).
-5. Aesthetics or any judge metric: plan a calibration step (user labels 5–10 outputs good/bad).
-   If agreement is low, fall back to blind pairwise ranking by the user.
+5. Aesthetics or any judge metric: plan the calibration step (Step 5) — the user labels outputs
+   good or bad, blind; metrics that disagree with them are flagged, and the blind pairwise ranking
+   becomes the ranking that counts.
 6. No single weighted score. Gates disqualify; ranks order the survivors, shown against cost.
 
 Show the chosen metrics, with one line on why each, and get a yes before continuing.
@@ -227,6 +231,14 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    region crops, gallery and all data, in one file. Put your reading of the results (what passed, what
    is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
    report, not loose images.
+
+5. **Calibrate against the user's eye** (after the smoke round, and again after the full run):
+   `uv run --project <runner> runware-eval label bench.yaml --round <r>` makes a blind labeling page
+   (good or bad, and "which is better" on random pairs). The user labels what they can and downloads
+   `labels.json`; `runware-eval calibrate bench.yaml --round <r> --labels <file>` reports how often
+   each check agreed with them, the threshold that would agree best, which rank metrics order their
+   good above their bad, and a human ranking (Bradley-Terry). Show the suggestions; change
+   `bench.yaml` only with the user's yes. Below about 20 labels, call the suggestions hints.
 
 Vision-model checks run in `score` as the second stage of a funnel: only outputs that fail at most
 `judge_when.max_failed_checks` pixel checks are judged, with one combined call per judge (about

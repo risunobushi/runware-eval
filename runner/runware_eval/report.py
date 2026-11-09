@@ -96,6 +96,15 @@ def heatmap(p, opt):
     return out
 
 
+def seed_verdict(passes, rule="majority"):
+    """Verdict over the seeds of one input: majority (more than half), all, or any."""
+    if rule == "all":
+        return all(passes)
+    if rule == "any":
+        return any(passes)
+    return sum(passes) * 2 > len(passes)
+
+
 def fmtv(v):
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return "—"
@@ -196,19 +205,24 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     in_order = [k for k in inputs if any(s["input"] == k for s in scored)]
     recipes = {r["id"]: r for r in b["recipes"]}
 
-    # aggregate per recipe across inputs and seeds
+    # aggregate per recipe: seeds are judged by `pass_rule` within each input (one unlucky or lucky seed
+    # does not decide), then a recipe must pass a check on every input
+    rule = b.get("pass_rule", "majority")
     agg = {}
     for s in scored:
-        g = gate_rows(s)
-        a = agg.setdefault(s["recipe"], {"fails": 0, "checks": 0, "items": [], "costs": [], "lat": []})
-        a["fails"] += sum(1 for x in g if x["pass"] is False)
-        a["checks"] += sum(1 for x in g if x["pass"] is not None)
+        a = agg.setdefault(s["recipe"], {"items": [], "costs": [], "lat": [], "by_check": {}})
+        for g in gate_rows(s):
+            if g["pass"] is not None:
+                a["by_check"].setdefault(g["key"], {}).setdefault(s["input"], []).append(g["pass"])
         a["items"].append(s)
         if s.get("cost") is not None:
             a["costs"].append(s["cost"])
         if s.get("latency_s") is not None:
             a["lat"].append(s["latency_s"])
     for rid, a in agg.items():
+        a["verdict"] = {k: all(seed_verdict(v, rule) for v in by_in.values()) for k, by_in in a["by_check"].items()}
+        a["fails"] = sum(1 for v in a["verdict"].values() if not v)
+        a["checks"] = len(a["verdict"])
         a["cost"] = float(np.mean(a["costs"])) if a["costs"] else listed.get(rid)
         a["cost_src"] = "measured" if a["costs"] else "listed"
         a["latency"] = float(np.mean(a["lat"])) if a["lat"] else None
@@ -298,6 +312,38 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             out.append(f"<li class='warn'><strong>No output in this folder:</strong> {e(', '.join(missing))}</li>")
         out.append("</ul></section>")
 
+    # calibration and human ranking (from the labeling page)
+    cal_path = os.path.join(out_dir, "calibration.json")
+    if os.path.exists(cal_path):
+        cal = json.load(open(cal_path, encoding="utf8"))
+        out.append(f"<section><h2>Your judgement</h2><p class='ink2'>From the blind labeling page: "
+                   f"{cal['labeled']} outputs labeled ({cal['good']} good). Agreement is balanced: 50% is chance, "
+                   f"100% means the check always matched you. {'Few labels so far: read suggestions as hints. ' if cal.get('few_labels') else ''}Suggested thresholds are not applied until you "
+                   f"change <span class='mono'>bench.yaml</span>.</p>")
+        if cal.get("gates"):
+            out.append("<div class='tablewrap'><table><thead><tr><th>Check</th><th>Threshold</th><th>Agrees with you"
+                       "</th><th>Suggested</th><th>Would agree</th></tr></thead><tbody>"
+                       + "".join(f"<tr><td>{e(g['label'])}</td><td class='mono'>{e(g['key'])}: {fmtv(g['threshold_now'])}"
+                                 f"</td><td class='mono'>{g['agreement_now']:.0%}</td><td class='mono'>"
+                                 f"{fmtv(g['suggested']) if g['suggested'] != g['threshold_now'] else '—'}</td>"
+                                 f"<td class='mono'>{g['agreement_suggested']:.0%}</td></tr>" for g in cal["gates"])
+                       + "</tbody></table></div>")
+        if cal.get("ranks"):
+            out.append("<div class='tablewrap'><table><thead><tr><th>Rank metric</th><th>Orders your good above "
+                       "your bad (AUC)</th></tr></thead><tbody>"
+                       + "".join(f"<tr><td>{e(r['label'])}</td><td class='mono'>{r['auc']:.2f}"
+                                 f"{' · weak' if r['auc'] < 0.7 else ''}</td></tr>" for r in cal["ranks"])
+                       + "</tbody></table></div>")
+        if cal.get("human_ranking"):
+            hr = sorted(cal["human_ranking"].items(), key=lambda x: -x[1]["score"])
+            out.append("<h3>Human ranking</h3><div class='tablewrap'><table><thead><tr><th>#</th><th>Recipe</th>"
+                       "<th>Score (1.0 = average)</th><th>Wins</th></tr></thead><tbody>"
+                       + "".join(f"<tr><td class='rank'>{i}</td><td>{e(r)}</td><td class='mono'>{v['score']:.2f}</td>"
+                                 f"<td class='mono'>{v['wins']:g} / {v['games']:g}</td></tr>"
+                                 for i, (r, v) in enumerate(hr, 1))
+                       + "</tbody></table></div>")
+        out.append("</section>")
+
     # trade-off chart
     rep = b.get("report") or {}
     xlab, ylab = rep.get("x", "cost"), rep.get("y") or next(
@@ -329,8 +375,11 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         if not groups or groups[-1][0] != c["dimension"]:
             groups.append([c["dimension"], 0])
         groups[-1][1] += 1
-    out.append("<section><h2>Check by check</h2><p class='ink2'>A cell fails if the check failed on any input or "
-               "seed. Ranked by failed checks, then cost. Thresholds come from <span class='mono'>bench.yaml</span>.</p>"
+    rule_txt = {"majority": "most seeds", "all": "every seed", "any": "at least one seed"}.get(rule, rule)
+    out.append("<section><h2>Check by check</h2><p class='ink2'>A check passes when it passes on "
+               f"{rule_txt} of every input (<span class='mono'>pass_rule: {e(rule)}</span>); cells show how many "
+               "outputs passed. Ranked by failed checks, then cost. Thresholds come from "
+               "<span class='mono'>bench.yaml</span>.</p>"
                "<div class='tablewrap'><table><thead><tr><th></th><th></th>"
                + "".join(f"<th class='grp' colspan='{n}'>{e(d.replace('_', ' '))}</th>" for d, n in groups)
                + "<th></th><th></th></tr><tr><th>#</th><th>Recipe</th>"
@@ -343,9 +392,12 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             if not ok:
                 cells.append("<td><span class='chip na'>not run</span></td>")
                 continue
-            worst = next((g for g in vals if g["pass"] is False), vals[0])
-            cells.append(f"<td><span class='chip {'ok' if all(ok) else 'bad'}'>{'✓' if all(ok) else '✕'} "
-                         f"<span class='mono'>{e(worst['value'])}</span></span></td>")
+            v = a["verdict"].get(c["key"], all(ok))
+            shown = (f"{sum(ok)}/{len(ok)}" if len(ok) > 1
+                     else next((g for g in vals if g["pass"] is not None), vals[0])["value"])
+            cells.append(f"<td><span class='chip {'ok' if v else 'bad'}' title='passed on {sum(ok)} of {len(ok)} "
+                         f"outputs (inputs x seeds)'>{'✓' if v else '✕'} <span class='mono'>{e(str(shown))}"
+                         f"</span></span></td>")
         cost = f"${a['cost']:.4f}" + ("" if a["cost_src"] == "measured" else "*") if a["cost"] is not None else "—"
         lat = f"{a['latency']:.0f}s" if a["latency"] else "—"
         out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' style='all:unset;cursor:pointer;"

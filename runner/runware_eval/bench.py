@@ -150,6 +150,11 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
     """One job per (input, recipe, seed). Smoke round: first input (unless chosen), first seed."""
     inputs = [i for i in b["inputs"] if not only_inputs or stem(i["path"]) in only_inputs]
     recipes = [r for r in b["recipes"] if not only_recipes or r["id"] in only_recipes]
+    cap = b.get("max_models")
+    models = sorted({r["model"] for r in recipes})
+    if cap and len(models) > cap:
+        raise ValueError(f"{len(models)} models selected but max_models is {cap}: choose which {cap} to test "
+                         "(list their recipes under `recipes:` in bench.yaml, or pass --recipes).")
     seeds = b.get("seeds", [1])
     if round_name == "smoke":
         seeds = seeds[:1]
