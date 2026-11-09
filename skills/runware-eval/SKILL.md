@@ -18,70 +18,67 @@ of good. The agent's job is setup and judgement. Execution belongs to the runner
 **Core rule: the user decides what "good" means; the catalog decides what is possible.** Never pick
 metrics before asking, and never claim what a model can or cannot do without reading its schema.
 
-## Step 0 — Preflight: the Runware MCP is required
+## Step 0 — Preflight: Runware MCP and Runware CLI, before anything else
 
-Before anything else, check whether Runware MCP tools are available in this session (tools named
-`list_models`, `model_schema`, `model_pricing`, `run`, e.g. `mcp__runware__list_models`).
+The bench needs both, every time. Check them before any other step, including the existing-bench
+question, and do not continue until both are ready. Do not substitute guessed REST calls, web
+searches, or model knowledge from memory.
 
-**If they are missing, install it for the user. Do not continue without it**, and do not substitute
-guessed REST calls, web searches, or model knowledge from memory.
+- **Runware MCP**: catalog discovery, schemas, pricing and the smoke round.
+- **Runware CLI**: uploads local files at full size (the hosted MCP runs on Runware's servers and
+  cannot read them), and gives the runner its login (the MCP's browser sign-in does not extend to
+  scripts).
 
-- **You can run shell commands and the client is Claude Code:** say you are adding the hosted
-  Runware MCP to their config, then run it yourself (the user approves the command):
-  `claude mcp add --transport http runware https://mcp.runware.ai`
-  If `claude mcp list` already shows `runware` but its tools are missing, it is added but not yet
-  connected or signed in: skip the add.
-- **Other clients** (Cursor, Claude Desktop, Codex), or no shell: give the user the server URL
-  `https://mcp.runware.ai` and where to add it in that client's MCP settings.
-- **Local server instead** (no browser sign-in): `claude mcp add runware -e RUNWARE_API_KEY=<key> --
-  npx -y @runware/mcp`. The user runs this in their own terminal, so the key never enters the chat.
+### 1. Check both (read-only)
 
-Then give the user the steps only they can do. A server added during a session is not loaded until
-Claude Code restarts (`/mcp` will not list it yet), so the restart must keep the conversation:
+| | Ready when | Otherwise |
+|---|---|---|
+| MCP | Tools such as `list_models`, `model_schema`, `run` exist in this session (e.g. `mcp__runware__list_models`) | `claude mcp list` shows `runware`: added, not connected or signed in. Not listed: missing. |
+| CLI | `runware auth status` prints a table whose `Status` row is `valid` | Command not found: missing. Any other `Status` value (e.g. `not configured`): installed, not signed in. |
 
-1. Exit Claude Code (`/exit`).
-2. Run `claude -c` in the same folder. It reopens this conversation with the new server loaded.
-3. Run `/mcp`, select **runware**, choose **Authenticate**, and sign in in the browser.
+Read-only looks at the working folder (e.g. for an existing `bench.yaml`) are fine during this step.
+Show the user this status in two lines, then fix what is missing.
+
+### 2. Install what is missing, yourself (the user approves each command)
+
+Install the CLI first: it needs no restart. Then the MCP.
+
+- **CLI**
+  - Windows with scoop: `scoop bucket add runware https://github.com/Runware/scoop-bucket.git` then
+    `scoop install runware`. Without scoop, ask whether to install scoop first.
+  - macOS: `brew install --cask runware/tap/runware`
+  - Linux: `curl -fsSL https://cli.runware.ai/install.sh | sh`
+  - If `runware` is still not found, call it by its full path (e.g. `~/scoop/shims/runware`).
+- **MCP** (Claude Code): `claude mcp add --transport http runware https://mcp.runware.ai`. Skip the
+  add if `claude mcp list` already shows it. Other clients, or no shell: give the user the URL
+  `https://mcp.runware.ai` and where it goes in that client's MCP settings.
+
+### 3. One message with everything only the user can do, in this order
+
+Include only the steps that apply:
+
+1. **CLI sign-in:** in a **separate terminal**, run `runware auth login` and paste the API key at the
+   prompt (runware.ai → dashboard → API keys). Never ask for the key in the chat; never use `--key`.
+2. **Reload for the MCP** (only if you added it in this session; `/mcp` will not list it yet):
+   `/exit`, then `claude -c` in the same folder. It reopens this conversation.
+3. **MCP sign-in:** `/mcp` → **runware** → **Authenticate**, and sign in in the browser.
 4. Say "continue".
 
-If the server was already configured before this session started, skip steps 1–2. Never ask for the
-API key in the chat. While they install it,
-you may ask Step 1 question 1 (goal and inputs) so the restart is not wasted. Nothing past that.
+While they do this, ask one thing, so the wait is not wasted: if the folder already has a bench, the
+existing-bench question below; otherwise Step 1 question 1 (goal and inputs). Nothing else.
+
+### 4. Re-check both
+
+When they say continue, run the checks in part 1 again. Proceed only when both are ready.
 
 Urgency ("I'm in a hurry", "just get going") is not declining. Only if the user explicitly declines
-the MCP: read the public catalog at
-`https://runware.ai/docs/models/index.json` and each model's `schema` URL, and say that the bench
-is being set up in read-only mode.
+the MCP: read the public catalog at `https://runware.ai/docs/models/index.json` and each model's
+`schema` URL, and say the bench is in read-only mode. Only if they decline the CLI: use public URLs
+they already host, or inline base64 through the MCP for a single small image (it fills the
+conversation and forces downscaling). Never ask for a `.env` file.
 
-### Preflight, part 2: the Runware CLI (for local files)
-
-The hosted MCP runs on Runware's servers, so it cannot read local files, and its browser sign-in
-does not extend to scripts or the runner. The Runware CLI uploads local files at full size
-(`runware media upload`) and gives the runner a login. Set it up as soon as the user says their
-inputs are local files (Step 1, question 1). Skip it only if every input is a public URL.
-
-1. **Check:** run `runware auth status`.
-   - Command not found: install it (step 2).
-   - Shows `Status: valid`: ready, go on.
-   - Anything else: it is installed but not signed in (step 3).
-2. **Install it yourself** (the user approves the command). No restart is needed: it is a program,
-   not an MCP server.
-   - Windows with scoop: `scoop bucket add runware https://github.com/Runware/scoop-bucket.git`
-     then `scoop install runware`. Without scoop, ask whether to install scoop first.
-   - macOS: `brew install --cask runware/tap/runware`
-   - Linux: `curl -fsSL https://cli.runware.ai/install.sh | sh`
-
-   If `runware` is still not found afterwards, the install directory is not on this shell's PATH
-   yet: call it by its full path (e.g. `~/scoop/shims/runware`) rather than asking for a restart.
-3. **Sign-in is the user's step**, because the key must never enter the chat. Ask them to open a
-   **separate terminal**, run `runware auth login`, and paste their API key at the prompt (keys are
-   at runware.ai → dashboard → API keys). Never use `--key`, and never ask for the key here. When they
-   say done, run `runware auth status` again and confirm `valid` before continuing.
-
-Then upload each input with `runware media upload <file> -F json` and use the returned `mediaUUID`
-in MCP calls and in `bench.yaml`. Fallbacks, only if the user declines the CLI: public URLs they
-already host, or inline base64 through the MCP for a single small image (it fills the conversation
-and forces downscaling). Do not ask for a `.env` file while the CLI route is available.
+Upload local inputs with `runware media upload <file> -F json` and use the returned `mediaUUID` in
+MCP calls and in `bench.yaml`.
 
 ## Existing benches: mention, then ask
 
@@ -94,8 +91,8 @@ lines that it exists (path, its goal in a few words, whether it has results), th
 - **Review the existing results** first.
 
 In the same message you may ask which input files to use (and whether they are the ones already in
-the bench). Then **wait for the answer before doing anything else**: no installs, no uploads, no
-further intake. Describe results only if they choose to review them.
+the bench). Then **wait for the answer before doing anything else**: no uploads, no further
+intake. (Step 0 has already run: the tools are ready whichever option they choose.) Describe results only if they choose to review them.
 
 ## Step 1 — Intake: ask what to evaluate
 
@@ -104,8 +101,7 @@ only the rest. If they answer several at once in free text, map their words onto
 **show the table with their choices marked**, and ask them to confirm. Never skip showing the table:
 it is how users discover dimensions they had not thought of.
 
-1. **The goal** in one sentence, and the inputs (files or URLs). How many, and how varied. If any
-   input is a local file, run *Preflight, part 2* (the CLI) now, while the user answers question 2.
+1. **The goal** in one sentence, and the inputs (files or URLs). How many, and how varied.
 2. **What to evaluate** — present the dimensions as a multi-select. Do not pre-select:
 
    | Dimension | The question it answers |
@@ -199,6 +195,7 @@ mis-specified: fix or demote it, and say so in the caveats.
 | "I'll loop `run` over the whole grid in chat" | The MCP is for setup and the smoke round. The runner executes. |
 | "List price × N is close enough" | Use the dry-run estimate when available, and say which one you used. |
 | "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
+| "Inputs are URLs / already uploaded, so I can skip one of the two" | Step 0 needs both every time: the runner uses the CLI login. |
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
 | "I'll ask for the key so I can run `runware auth login --key`" | Never. The user signs in at the CLI prompt in their own terminal. |
 | "There's already a bench for this; I'll pick up where it left off" | Mention it and ask. A new request is a new bench unless the user says otherwise. |
