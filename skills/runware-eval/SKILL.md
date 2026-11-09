@@ -23,16 +23,29 @@ metrics before asking, and never claim what a model can or cannot do without rea
 Before anything else, check whether Runware MCP tools are available in this session (tools named
 `list_models`, `model_schema`, `model_pricing`, `run`, e.g. `mcp__runware__list_models`).
 
-**If they are missing, stop and ask the user to install it.** Do not substitute guessed REST calls,
-web searches, or model knowledge from memory. Offer:
+**If they are missing, install it for the user. Do not continue without it**, and do not substitute
+guessed REST calls, web searches, or model knowledge from memory.
 
-- Claude Code, hosted (recommended, sign-in in the browser):
+- **You can run shell commands and the client is Claude Code:** say you are adding the hosted
+  Runware MCP to their config, then run it yourself (the user approves the command):
   `claude mcp add --transport http runware https://mcp.runware.ai`
-- Claude Code, local: `claude mcp add runware -e RUNWARE_API_KEY=<key> -- npx -y @runware/mcp`
-- Other clients (Cursor, Claude Desktop, Codex): add the same server in their MCP settings.
+  If `claude mcp list` already shows `runware` but its tools are missing, it is added but not yet
+  connected or signed in: skip the add.
+- **Other clients** (Cursor, Claude Desktop, Codex), or no shell: give the user the server URL
+  `https://mcp.runware.ai` and where to add it in that client's MCP settings.
+- **Local server instead** (no browser sign-in): `claude mcp add runware -e RUNWARE_API_KEY=<key> --
+  npx -y @runware/mcp`. The user runs this in their own terminal, so the key never enters the chat.
 
-MCP tools load when a session starts, so tell the user to restart the session (or run `/mcp`) and
-re-invoke this skill. Never ask the user to paste an API key into the chat. While they install it,
+Then give the user the steps only they can do. A server added during a session is not loaded until
+Claude Code restarts (`/mcp` will not list it yet), so the restart must keep the conversation:
+
+1. Exit Claude Code (`/exit`).
+2. Run `claude -c` in the same folder. It reopens this conversation with the new server loaded.
+3. Run `/mcp`, select **runware**, choose **Authenticate**, and sign in in the browser.
+4. Say "continue".
+
+If the server was already configured before this session started, skip steps 1–2. Never ask for the
+API key in the chat. While they install it,
 you may ask Step 1 question 1 (goal and inputs) so the restart is not wasted. Nothing past that.
 
 Urgency ("I'm in a hurry", "just get going") is not declining. Only if the user explicitly declines
@@ -129,7 +142,8 @@ re-runnable later without an agent, and adding a new model must mean adding one 
 | "I'll write custom scripts for this user" | Write `bench.yaml`. A one-off script is not a bench. |
 | "I'll loop `run` over the whole grid in chat" | The MCP is for setup and the smoke round. The runner executes. |
 | "List price × N is close enough" | Use the dry-run estimate when available, and say which one you used. |
-| "The MCP isn't here; I'll call the API directly" | Stop and ask the user to install it (Step 0). |
+| "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
+| "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
 
 ## Quality bar
 
