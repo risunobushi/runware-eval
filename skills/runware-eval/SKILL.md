@@ -53,22 +53,35 @@ the MCP: read the public catalog at
 `https://runware.ai/docs/models/index.json` and each model's `schema` URL, and say that the bench
 is being set up in read-only mode.
 
-### Local input files
+### Preflight, part 2: the Runware CLI (for local files)
 
 The hosted MCP runs on Runware's servers, so it cannot read local files, and its browser sign-in
-does not extend to scripts or the runner. Getting local inputs to Runware, in order of preference:
+does not extend to scripts or the runner. The Runware CLI uploads local files at full size
+(`runware media upload`) and gives the runner a login. Set it up as soon as the user says their
+inputs are local files (Step 1, question 1). Skip it only if every input is a public URL.
 
-1. **Runware CLI** (no key in chat or in project files). The user runs this in their own terminal:
-   install it (`scoop install runware` after `scoop bucket add runware
-   https://github.com/Runware/scoop-bucket.git` on Windows, `brew install --cask runware/tap/runware`
-   on macOS, `curl -fsSL https://cli.runware.ai/install.sh | sh` on Linux), then `runware auth login`.
-   You then upload with `runware media upload <file> -F json` and use the returned `mediaUUID` in
-   MCP calls and in `bench.yaml`. The runner reuses the CLI login.
-2. **Public URLs** the user already hosts.
-3. **Inline base64 through the MCP**: only for one small image in a pinch. It fills the
-   conversation and forces downscaling.
+1. **Check:** run `runware auth status`.
+   - Command not found: install it (step 2).
+   - Shows `Status: valid`: ready, go on.
+   - Anything else: it is installed but not signed in (step 3).
+2. **Install it yourself** (the user approves the command). No restart is needed: it is a program,
+   not an MCP server.
+   - Windows with scoop: `scoop bucket add runware https://github.com/Runware/scoop-bucket.git`
+     then `scoop install runware`. Without scoop, ask whether to install scoop first.
+   - macOS: `brew install --cask runware/tap/runware`
+   - Linux: `curl -fsSL https://cli.runware.ai/install.sh | sh`
 
-Do not ask the user to create a `.env` file while the CLI route is available.
+   If `runware` is still not found afterwards, the install directory is not on this shell's PATH
+   yet: call it by its full path (e.g. `~/scoop/shims/runware`) rather than asking for a restart.
+3. **Sign-in is the user's step**, because the key must never enter the chat. Ask them to open a
+   **separate terminal**, run `runware auth login`, and paste their API key at the prompt (keys are
+   at runware.ai → dashboard → API keys). Never use `--key`, and never ask for the key here. When they
+   say done, run `runware auth status` again and confirm `valid` before continuing.
+
+Then upload each input with `runware media upload <file> -F json` and use the returned `mediaUUID`
+in MCP calls and in `bench.yaml`. Fallbacks, only if the user declines the CLI: public URLs they
+already host, or inline base64 through the MCP for a single small image (it fills the conversation
+and forces downscaling). Do not ask for a `.env` file while the CLI route is available.
 
 ## Step 1 — Intake: ask what to evaluate
 
@@ -77,7 +90,8 @@ only the rest. If they answer several at once in free text, map their words onto
 **show the table with their choices marked**, and ask them to confirm. Never skip showing the table:
 it is how users discover dimensions they had not thought of.
 
-1. **The goal** in one sentence, and the inputs (files or URLs). How many, and how varied.
+1. **The goal** in one sentence, and the inputs (files or URLs). How many, and how varied. If any
+   input is a local file, run *Preflight, part 2* (the CLI) now, while the user answers question 2.
 2. **What to evaluate** — present the dimensions as a multi-select. Do not pre-select:
 
    | Dimension | The question it answers |
@@ -172,6 +186,8 @@ mis-specified: fix or demote it, and say so in the caveats.
 | "List price × N is close enough" | Use the dry-run estimate when available, and say which one you used. |
 | "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
+| "I'll ask for the key so I can run `runware auth login --key`" | Never. The user signs in at the CLI prompt in their own terminal. |
+| "Local files: I'll base64 them into the MCP call" | Install the CLI and upload at full size. Inline is a last resort for one small image. |
 
 ## Quality bar
 
