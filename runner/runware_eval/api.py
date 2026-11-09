@@ -104,3 +104,11 @@ def listed_price(air):
     prices = [r["amount"] for r in p.get("rates", []) if isinstance(r.get("amount"), (int, float))]
     prices += [e["price"] for e in p.get("examples", []) if isinstance(e.get("price"), (int, float))]
     return max(prices) if prices else None
+
+
+def recipe_price(recipe):
+    """Price per output for a recipe with no measured runs: the first `$x` in its notes (written by
+    whoever set the recipe up, tier-specific), else the highest price in the model's schema."""
+    import re
+    m = re.search(r"\$\s?(\d+(?:\.\d+)?)", recipe.get("notes") or "")
+    return float(m.group(1)) if m else listed_price(recipe["model"])

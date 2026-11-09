@@ -208,7 +208,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         if s.get("latency_s") is not None:
             a["lat"].append(s["latency_s"])
     for rid, a in agg.items():
-        a["cost"] = float(np.mean(a["costs"])) if a["costs"] else listed.get(recipes.get(rid, {}).get("model"))
+        a["cost"] = float(np.mean(a["costs"])) if a["costs"] else listed.get(rid)
         a["cost_src"] = "measured" if a["costs"] else "listed"
         a["latency"] = float(np.mean(a["lat"])) if a["lat"] else None
     order = sorted(agg, key=lambda r: (agg[r]["fails"], agg[r]["cost"] if agg[r]["cost"] is not None else 9))
@@ -255,7 +255,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                f"<h1>{e(b.get('title', 'Which recipe works best?'))}</h1><p class='ink2'>{e(b['goal'].strip())}</p>"
                f"<div class='meta'><span>{len(agg)} recipes</span><span>{len(in_order)} input(s)</span>"
                f"<span>seed(s) {', '.join(map(str, seeds))}</span><span>{len(scored)} outputs scored</span>"
-               f"<span>Measured spend ${measured:.3f}</span></div></header>")
+               f"<span>Generation spend ${measured:.3f}</span>"
+               f"<span>Checks spend ${data.get('judge_cost', 0) + sum(r.get('eval_cost') or 0 for r in data.get('attempted_rows', [])):.3f}</span>"
+               f"<span>Judges: {e(', '.join(data.get('judges') or [])) or 'off'}</span></div></header>")
     best = order[0]
     cheapest_pass = min(passing, key=lambda r: agg[r]["cost"] or 9) if passing else None
     out.append("<section aria-label='Summary'><div class='cards'>"
@@ -336,8 +338,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                    f"font-weight:600'>{e(rid)}</button><div class='muted mono' style='font-size:11px'>"
                    f"{e(recipes.get(rid, {}).get('model', ''))}</div></td>{''.join(cells)}"
                    f"<td class='mono'>{cost}</td><td class='mono'>{lat}</td></tr>")
-    out.append("</tbody></table></div><p class='muted' style='font-size:12px'>* listed price (no measured cost "
-               "for this recipe yet).</p></section>")
+    out.append("</tbody></table></div><p class='muted' style='font-size:12px'>* listed price (no measured cost for this recipe yet).</p></section>")
 
     # comparison viewer
     crop_name = next((o.get("crop_name") for o in originals.values() if o.get("crop_name")), None)

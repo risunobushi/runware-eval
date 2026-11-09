@@ -45,9 +45,9 @@ Measure pixel shift before deviation: a 2 px misalignment inflates ΔE everywher
 
 | id | family | trust | needs | runs_on | unit / direction | default gate | status |
 |---|---|---|---|---|---|---|---|
-| `ocr_cer` | ocr | deterministic | text | local_cpu | character error rate, lower | ≤ 0.02 | ready |
+| `ocr_cer` | ocr | deterministic | text | local_cpu | character error rate, lower | ≤ 0.02 | planned |
 | `logo_template_match` | geometric | deterministic | reference, region | local_cpu | 0–1, higher | ≥ 0.9 | planned |
-| `ocr_extra_text` | ocr | deterministic | text | local_cpu | count of unexpected words, lower | user-set | ready |
+| `ocr_extra_text` | ocr | deterministic | text | local_cpu | count of unexpected words, lower | user-set | planned |
 
 Models often add text nobody asked for (taglines, credits, gibberish). Score `ocr_cer` on whether
 the expected string is present, and report `ocr_extra_text` separately. Ask the user whether extra
@@ -64,7 +64,14 @@ text is a failure (a gate) or acceptable.
 model each question per output. Use a **panel of judges from different providers** (Runware hosts
 several) and report agreement between them.
 
-`task_specific` covers measurable instructions. Example: a contact shadow is the lightness drop
+Vision-model metrics (`vlm_*`) send image 1 (original, or a crop of `region`) and image 2 (output,
+same crop) to every judge in `judges`, plus any `refs: [<media name>]` as images 3, 4, … Use `refs`
+whenever a question says "as in the reference". Default panel: one model each from Google,
+Anthropic and OpenAI. In testing, Gemini scored rubrics far more generously than Claude or GPT, which
+is why rubrics are rank-only until calibrated. Cost is about $0.004–0.005 per judge call.
+
+`task_specific` covers measurable instructions. Implemented names: `lr_lighting_shift`,
+`shading_contrast`, `backdrop_lightness` (gate with `abs_max`) and `contact_shadow`. Example: a contact shadow is the lightness drop
 (ΔL*) in a band directly below the product, compared with the backdrop. Gate it from both sides
 (e.g. 8 ≤ ΔL* ≤ 30), because "too dark" is also a failure.
 
@@ -74,7 +81,7 @@ several) and report agreement between them.
 |---|---|---|---|---|---|---|---|
 | `aesthetic_predictor` | learned_aesthetic | learned | — | serverless_gpu | score, higher | rank only | planned |
 | `vlm_rubric` | judge | judge | brief | runware_vlm | 1–5, higher | rank only | ready |
-| `pairwise_human` | human | human | labels | local_cpu | Bradley-Terry score | rank only | ready |
+| `pairwise_human` | human | human | labels | local_cpu | Bradley-Terry score | rank only | planned |
 
 Aesthetics is never a gate until calibrated. The user labels 5–10 outputs good or bad; the report
 shows how often each metric agreed with them. If agreement is below about 70%, rank by blind

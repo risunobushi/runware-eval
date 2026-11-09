@@ -201,8 +201,9 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
    report, not loose images.
 
-Metrics marked `planned` in the registry (vision-model judges, OCR, human ranking) show as *not run*
-in the report. Say so; never present them as passed.
+Vision-model checks run in `score` with the panel in `judges` (about $0.06 per output for four
+checks × three judges; answers are cached; `--no-judges` skips them). Metrics marked `planned` in the
+registry (OCR, human ranking) show as *not run* in the report. Say so; never present them as passed.
 
 **Before reporting, check the gates against the outputs.** A gate that every recipe fails, or one that
 passes something visibly wrong (e.g. a hue-only backdrop check passing a black backdrop), is

@@ -8,6 +8,8 @@ import numpy as np
 from PIL import Image
 
 from . import api
+from . import bench as benchmod
+from .score import input_region
 
 MASK_MODEL = "runware:112@5"  # BiRefNet General
 
@@ -107,4 +109,27 @@ def ensure_input_masks(b, out_dir):
                 target = os.path.join(out_dir, "masks", f"{os.path.splitext(os.path.basename(inp['path']))[0]}_{name}.png")
                 if not os.path.exists(target):
                     mask_from(inp["_url"], target)
-                inp["regions"][name] = os.path.relpath(target, b["_dir"])
+                inp["regions"][name] = os.path.abspath(target)  # absolute: out_dir may be on another drive
+
+
+def ensure_recipe_masks(b, out_dir, lock_path):
+    """Build and upload the model-input mask for every recipe with a `mask:` block, per input.
+
+    `mask: { edit: <region>, polarity: white_is_edit | white_is_keep }`. Drawn at the input's exact
+    size, because models such as Ideogram Precise Edit require matching dimensions.
+    """
+    os.makedirs(os.path.join(out_dir, "masks"), exist_ok=True)
+    for r in b["recipes"]:
+        spec = r.get("mask")
+        if not spec:
+            continue
+        for inp in b["inputs"]:
+            name = os.path.splitext(os.path.basename(inp["path"]))[0]
+            edit = input_region(b, inp, spec["edit"])
+            white = edit if spec.get("polarity", "white_is_edit") == "white_is_edit" else ~edit
+            if white.all() or not white.any():
+                raise ValueError(f"Mask for {r['id']} on {name} is all one colour; check `mask.edit`")
+            path = os.path.join(out_dir, "masks", f"{name}__{r['id']}__input_mask.png")
+            Image.fromarray((white * 255).astype(np.uint8)).save(path)
+            rec = benchmod.upload(path, os.path.abspath(path), lock_path)
+            inp.setdefault("_masks", {})[r["id"]] = rec["url"]

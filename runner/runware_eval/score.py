@@ -15,6 +15,9 @@ from PIL import Image
 from skimage.color import deltaE_ciede2000, rgb2lab
 from skimage.metrics import structural_similarity
 
+from concurrent.futures import ThreadPoolExecutor
+
+from . import judge as judge_mod
 from .bench import stem
 
 
@@ -39,6 +42,23 @@ def load_mask(path, size):
 def erode(mask, pct=0.15):
     k = max(1, int(round(max(mask.shape) * pct / 100)))
     return cv2.erode(mask.astype(np.uint8), np.ones((2 * k + 1, 2 * k + 1), np.uint8)) > 0
+
+
+def input_region(b, inp, spec):
+    """A named region of an input, at the input's size: a mask file, a `box`, or `not(<region>)`."""
+    W, H = Image.open(os.path.join(b["_dir"], inp["path"])).size
+    m = re.fullmatch(r"not\((\w+)\)", spec)
+    if m:
+        return ~input_region(b, inp, m.group(1))
+    v = (inp.get("regions") or {}).get(spec)
+    if isinstance(v, dict) and "box" in v:
+        x0, y0, x1, y1 = v["box"]
+        r = np.zeros((H, W), bool)
+        r[y0:y1, x0:x1] = True
+        return r
+    if isinstance(v, str) and not v.startswith("auto:"):
+        return load_mask(os.path.join(b["_dir"], v), (W, H))
+    raise KeyError(f"Region '{spec}' is not defined for {inp['path']}")
 
 
 class Pair:
@@ -214,14 +234,26 @@ def label(opt):
     return f"{name} ({region})" if region else name
 
 
-def score_pair(b, p):
+JUDGED = ("vlm_checklist", "vlm_same_object", "vlm_rubric")
+
+
+def score_pair(b, p, pending=None):
+    """Deterministic metrics now; vision-model metrics are queued in `pending` (run later, in parallel)."""
     rows = []
     for dim, spec in (b.get("evaluate") or {}).items():
         for opt in spec.get("metrics", []):
-            fn = TASK_SPECIFIC.get(opt.get("name")) if opt["id"] == "task_specific" else METRICS.get(opt["id"])
             row = {"dimension": dim, "mode": spec.get("mode", "gate"), "id": opt["id"], "label": label(opt),
-                   "thresholds": {k: v for k, v in opt.items() if k not in ("id", "name", "label", "region", "rule", "on",
-                                                                          "judges", "questions", "rubric")}}
+                   "thresholds": {k: v for k, v in opt.items() if k not in (
+                       "id", "name", "label", "region", "rule", "on", "judges", "questions", "rubric", "scale")}}
+            if opt["id"] in JUDGED:
+                if pending is None:
+                    rows.append({**row, "status": "not_run", "note": "vision judges switched off"})
+                else:
+                    row = {**row, "status": "pending"}
+                    rows.append(row)
+                    pending.append((row, p, opt))
+                continue
+            fn = TASK_SPECIFIC.get(opt.get("name")) if opt["id"] == "task_specific" else METRICS.get(opt["id"])
             if fn is None:
                 rows.append({**row, "status": "not_run", "note": "not implemented in this runner version"})
                 continue
@@ -242,23 +274,61 @@ def find_mask(out_dir, fname, recipe):
     return None
 
 
-def score_all(b, out_dir, results=None):
+def judge_calls(b):
+    """Vision-model calls one output needs (metrics x judges), for budgeting."""
+    n = sum(1 for spec in (b.get("evaluate") or {}).values() for o in spec.get("metrics", []) if o["id"] in JUDGED)
+    return n * len(b.get("judges") or judge_mod.DEFAULT_JUDGES)
+
+
+OUT_RE = re.compile(r"(.+?)__(.+?)__s(\d+)\.\w+$")
+
+
+def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
     """Score every output file in out_dir. Uses results.jsonl for cost and latency when present."""
     ops = {r["file"]: r for r in (results or []) if r.get("status") == "success" and r.get("file")}
     inputs = {stem(i["path"]): i for i in b["inputs"]}
-    scored = []
-    for f in sorted(glob.glob(os.path.join(out_dir, "*__*__s*.*"))):
+    files = [f for f in sorted(glob.glob(os.path.join(out_dir, "*__*__s*.*")))
+             if OUT_RE.match(os.path.basename(f)) and os.path.basename(f).split("__")[0] in inputs]
+    panel = judge_mod.Panel(b.get("judges"), out_dir, log) if judges else None
+    if panel:
+        calls = judge_calls(b) * len(files)
+        projected = calls * judge_mod.EST_COST_PER_CALL
+        spent = sum((r.get("cost") or 0) + (r.get("eval_cost") or 0) for r in (results or []))
+        log(f"Vision judges: up to {calls} calls, about ${projected:.2f} (cached answers are free).")
+        if max_usd is not None and spent + projected > max_usd:
+            log(f"Skipping vision judges: ${spent + projected:.2f} would exceed the ${max_usd:.2f} cap.")
+            panel = None
+    scored, pending = [], []
+    for f in files:
         fname = os.path.basename(f)
-        inp, recipe, seed = re.match(r"(.+?)__(.+?)__s(\d+)\.\w+$", fname).groups()
-        if inp not in inputs:
-            continue
+        inp, recipe, seed = OUT_RE.match(fname).groups()
         p = Pair(b, inputs[inp], f, find_mask(out_dir, fname, recipe))
+        jobs = [] if panel else None
+        metrics = score_pair(b, p, jobs)
+        for row, pair, opt in jobs or []:
+            # keep only the small inline images, not the full-size arrays, while judging is queued
+            pending.append((row, judge_mod.prepare(pair, opt, b), opt))
         r = ops.get(fname, {})
         scored.append({"input": inp, "recipe": recipe, "seed": int(seed), "file": fname,
                        "native": f"{p.native[0]}x{p.native[1]}", "cost": r.get("cost"),
-                       "latency_s": r.get("latency_s"), "metrics": score_pair(b, p)})
+                       "latency_s": r.get("latency_s"), "metrics": metrics})
+    if pending:
+        def one(item):
+            row, prepared, opt = item
+            try:
+                vals = judge_mod.run_prepared(panel, prepared, opt)
+                ok = not (isinstance(vals.get("value"), float) and np.isnan(vals["value"]))
+                row.update(status="ok" if ok else "error", values=vals, note=vals.get("note"))
+                row["pass"] = check(vals, opt) if row["mode"] == "gate" and ok else None
+            except Exception as e:  # one judge failure must not sink the whole report
+                row.update(status="error", note=str(e))
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(one, pending))
+        log(f"Vision judges done: ${panel.spent:.3f} spent on new answers.")
     errors = [r for r in (results or []) if r.get("status") == "error"]
     attempted = [{"recipe": r["recipe"], "input": r["input"]} for r in (results or [])]
-    data = {"scored": scored, "errors": errors, "attempted": attempted}
+    data = {"scored": scored, "errors": errors, "attempted": attempted,
+            "attempted_rows": [{"eval_cost": r.get("eval_cost")} for r in (results or [])],
+            "judges": panel.judges if panel else [], "judge_cost": judge_mod.total_cost(out_dir)}
     json.dump(data, open(os.path.join(out_dir, "scores.json"), "w", encoding="utf8"), indent=1)
     return data

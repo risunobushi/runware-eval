@@ -32,10 +32,28 @@ URLs are sent, not media UUIDs: some provider-backed models fail to fetch a UUID
 A recipe's `size` block fits the input to a model's limits: `size: { multiple: 16, max_side: 2048,
 max_mp: 4.19 }`. Check each schema for its own limits and write them here.
 
+## Masks as model inputs
+
+A recipe can send a mask to models that take one (`$mask` in `params`):
+
+```yaml
+params: { inputs: { seedImage: $input, maskImage: $mask } }
+mask: { edit: logo, polarity: white_is_edit }       # or edit: not(logo); white_is_keep
+```
+
+The runner draws the mask at the input's exact size from the named region and uploads it. Check
+each model's mask convention in its schema and set `polarity` to match.
+
+Known limit (Ideogram 4.5 Precise Edit, tested): a small *keep* island inside a mostly white mask is
+not kept; the model regenerates it. A small *edit* area inside a black mask works pixel-exactly.
+Masks are reliable for "change only this", not for "change everything except this".
+
 ## Other optional fields
 
 - `label:` on any metric gives it a readable column name in the report.
 - `title:` (top level) is the report's heading.
+- `judges:` (top level) is the vision-model panel; metrics use it via `judges: $judges`.
+- `refs: [<media name>]` on a `vlm_*` metric shows those references to the judges.
 - `report: { x: cost, y: "Colour" }` picks the trade-off chart's axes, by metric label or `cost`.
   Default: cost against the first colour check.
 - Avoid YAML 1.1 surprises: keys like `on:`, `off:`, `yes:` are read as booleans by many parsers.

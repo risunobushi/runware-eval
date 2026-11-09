@@ -26,6 +26,8 @@ def setup(a):
 def cmd_estimate(a):
     b, out = setup(a)
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
+    run.ensure_input_masks(b, out)
+    run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
     jobs = bench.jobs(b, a.round, a.inputs, a.recipes)
     rows = run.estimate(jobs, run.read_results(out))
     total = sum(r["est_cost"] or 0 for r in rows)
@@ -51,6 +53,7 @@ def cmd_run(a):
         sys.exit("bench.yaml has no budget.max_usd: set a cap before running.")
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
     run.ensure_input_masks(b, out)
+    run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
     jobs = bench.jobs(b, a.round, a.inputs, a.recipes)
     results = run.execute(jobs, out, cap)
     print(f"Done. Results in {out}")
@@ -63,7 +66,9 @@ def cmd_score(a, b=None, out=None, results=None):
         b, out = setup(a)
         bench.ensure_media(b, os.path.join(out, "media.lock.json"))
         run.ensure_input_masks(b, out)
-    data = score.score_all(b, out, results if results is not None else run.read_results(out))
+    data = score.score_all(b, out, results if results is not None else run.read_results(out),
+                           judges=not getattr(a, "no_judges", False),
+                           max_usd=(b.get("budget") or {}).get("max_usd"))
     print(f"Scored {len(data['scored'])} outputs → {os.path.join(out, 'scores.json')}")
     cmd_report(a, b, out)
 
@@ -74,7 +79,7 @@ def cmd_report(a, b=None, out=None):
         bench.ensure_media(b, os.path.join(out, "media.lock.json"))
         run.ensure_input_masks(b, out)
     notes = json.load(open(a.notes, encoding="utf8")) if getattr(a, "notes", None) else None
-    listed = {r["model"]: api.listed_price(r["model"]) for r in b["recipes"]}
+    listed = {r["id"]: api.recipe_price(r) for r in b["recipes"]}
     print("Report →", report.build(b, out, notes, listed))
 
 
@@ -89,6 +94,8 @@ def main():
         p.add_argument("--notes", help="JSON with `findings` and `caveats` to show in the report")
         if name == "run":
             p.add_argument("--no-score", action="store_true")
+        if name in ("run", "score"):
+            p.add_argument("--no-judges", action="store_true", help="skip the vision-model checks")
         p.set_defaults(fn=fn)
     a = ap.parse_args()
     try:

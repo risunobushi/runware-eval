@@ -49,32 +49,32 @@ def media_entries(b):
     return out
 
 
-def ensure_media(b, lock_path):
-    """Upload each file once with the Runware CLI and remember its URL in a lock file.
+def upload(full, key, lock_path):
+    """Upload a file once with the Runware CLI; the lock file maps it (by content hash) to its URL.
 
     URLs, not UUIDs, are sent to models: some provider-backed models fail to fetch a media UUID.
     """
     lock = json.load(open(lock_path, encoding="utf8")) if os.path.exists(lock_path) else {}
-    changed = False
-    for name, entry in media_entries(b).items():
-        full = os.path.join(b["_dir"], entry["path"])
-        digest = hashlib.sha1(open(full, "rb").read()).hexdigest()
-        rec = lock.get(entry["path"])
-        if not rec or rec.get("sha1") != digest:
-            res = subprocess.run(["runware", "media", "upload", full, "-F", "json"],
-                                 capture_output=True, text=True)
-            if res.returncode != 0:
-                raise RuntimeError(f"Upload failed for {entry['path']}: {res.stderr.strip() or res.stdout.strip()}\n"
-                                   "Is the Runware CLI installed and signed in? (`runware auth status`)")
-            up = json.loads(res.stdout)
-            w, h = Image.open(full).size
-            rec = {"uuid": up["mediaUUID"], "url": up["mediaURL"], "sha1": digest, "width": w, "height": h}
-            lock[entry["path"]] = rec
-            changed = True
-        entry["_url"], entry["_size"] = rec["url"], (rec["width"], rec["height"])
-    if changed:
+    digest = hashlib.sha1(open(full, "rb").read()).hexdigest()
+    rec = lock.get(key)
+    if not rec or rec.get("sha1") != digest:
+        res = subprocess.run(["runware", "media", "upload", full, "-F", "json"], capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"Upload failed for {key}: {res.stderr.strip() or res.stdout.strip()}\n"
+                               "Is the Runware CLI installed and signed in? (`runware auth status`)")
+        up = json.loads(res.stdout)
+        w, h = Image.open(full).size
+        rec = {"uuid": up["mediaUUID"], "url": up["mediaURL"], "sha1": digest, "width": w, "height": h}
+        lock[key] = rec
         json.dump(lock, open(lock_path, "w", encoding="utf8"), indent=2)
-    return lock
+    return rec
+
+
+def ensure_media(b, lock_path):
+    """Upload every input and media reference once, and attach `_url` and `_size` to each entry."""
+    for entry in media_entries(b).values():
+        rec = upload(os.path.join(b["_dir"], entry["path"]), entry["path"], lock_path)
+        entry["_url"], entry["_size"] = rec["url"], (rec["width"], rec["height"])
 
 
 def fit(w, h, multiple=1, max_side=None, max_mp=None):
@@ -98,6 +98,13 @@ def resolve(value, ctx):
         return ctx["input"]["_url"]
     if token == "seed":
         return ctx["seed"]
+    if token == "mask":
+        url = ctx["input"].get("_masks", {}).get(ctx["recipe"]["id"])
+        if not url:
+            raise ValueError(f"Recipe {ctx['recipe']['id']} uses $mask but has no `mask:` block")
+        return url
+    if token == "judges":
+        return ctx["bench"].get("judges")
     if token.startswith("prompts."):
         return " ".join(ctx["bench"]["prompts"][token.split(".", 1)[1]].split())
     if token.startswith("input."):
