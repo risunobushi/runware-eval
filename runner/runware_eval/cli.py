@@ -29,7 +29,10 @@ def cmd_estimate(a):
     run.ensure_input_masks(b, out)
     run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
     jobs = bench.jobs(b, a.round, a.inputs, a.recipes)
-    rows = run.estimate(jobs, run.read_results(out))
+    runs_root = os.path.join(b["_dir"], "runs")
+    past = [r for d in (os.listdir(runs_root) if os.path.isdir(runs_root) else [])
+            for r in run.read_results(os.path.join(runs_root, d))]
+    rows = run.estimate(jobs, run.read_results(out) + past)
     total = sum(r["est_cost"] or 0 for r in rows)
     by = {}
     for r in rows:
@@ -42,8 +45,8 @@ def cmd_estimate(a):
     cap = (b.get("budget") or {}).get("max_usd")
     print(f"\n{len(rows)} tasks, about ${total:.3f}" + (f" (cap ${cap:.2f})" if cap else "")
           + ". Masks for scoring add a small amount per output.")
-    print("Measured costs come from earlier runs in this folder; listed costs are the highest price in the "
-          "model's schema. Runware has no reliable dry-run, so a smoke round is the way to measure.")
+    print("Measured costs come from earlier runs of this bench; otherwise the recipe's own price note, else the "
+          "model's highest listed price. Runware has no reliable dry-run, so a smoke round is the way to measure.")
 
 
 def cmd_run(a):

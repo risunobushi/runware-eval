@@ -29,19 +29,28 @@ def append_result(out_dir, row):
 
 
 def estimate(jobs, results):
-    """Per-job cost: measured average for that recipe if any run exists, else the listed price."""
+    """Per-job new spend. Measured average for the recipe if it ever ran (any folder in `results`),
+    else the price in the recipe's notes, else the model's highest listed price. A multi-step recipe
+    whose first image comes from a plain recipe in the same batch only adds its `then` step."""
     measured = {}
     for r in results:
-        if r.get("status") == "success" and r.get("cost") is not None:
+        if r.get("status") == "success" and r.get("cost") is not None and not r.get("base_hash"):
             measured.setdefault(r["recipe"], []).append(r["cost"])
-    rows, listed = [], {}
+    plain_hashes = {j["hash"] for j in jobs if not j.get("base_hash")} | {
+        r["hash"] for r in results if r.get("status") == "success" and not r.get("base_hash")}
+    rows, priced = [], {}
     for j in jobs:
+        rec = j.get("_recipe") or {}
         if j["recipe"] in measured:
             cost, source = float(np.mean(measured[j["recipe"]])), "measured"
         else:
-            if j["model"] not in listed:
-                listed[j["model"]] = api.listed_price(j["model"])
-            cost, source = listed[j["model"]], "listed (max)"
+            if j["recipe"] not in priced:
+                priced[j["recipe"]] = api.recipe_price(rec) if rec else api.listed_price(j["model"])
+            cost, source = priced[j["recipe"]], "recipe notes / listed"
+        if j.get("base_hash") and j["base_hash"] in plain_hashes:
+            then = rec.get("then")
+            cost = (api.recipe_price({"model": then["model"], "notes": ""}) if then else 0.0)
+            source = "first image reused" + (" + then-step (listed)" if then else "")
         rows.append({**j, "est_cost": cost, "est_source": source})
     return rows
 
