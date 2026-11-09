@@ -1,0 +1,22 @@
+[project]
+name = "runware-eval"
+version = "0.1.0"
+description = "Run, score and report a runware-eval bench.yaml on Runware."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pillow",
+  "pyyaml",
+  "opencv-python-headless",
+  "scikit-image",
+]
+
+[project.scripts]
+runware-eval = "runware_eval.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["runware_eval"]

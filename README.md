@@ -5,8 +5,8 @@ A test bench for [Runware](https://runware.ai) models. Tell your agent what you'
 metrics that measure your definition of good, and writes a `bench.yaml` you can re-run whenever a
 new model ships.
 
-> Status: the skill works (setup, intake, metric selection, candidate discovery, `bench.yaml`).
-> The runner (`runware-eval estimate` / `runware-eval run`) is in progress.
+> Status: the skill sets up the bench; the runner (`runner/`) estimates, runs, scores and reports it.
+> Vision-model judges, OCR and human ranking are planned and show as *not run* in reports.
 
 ## Install
 
@@ -36,6 +36,19 @@ changing my product?"* The skill will:
 4. find candidate models through the MCP and read their schemas;
 5. write `bench.yaml` (format in `references/bench-format.md`) and estimate the cost;
 6. run a one-input smoke round before anything bigger.
+
+## Runner
+
+```
+pip install -e runner                      # needs the Runware CLI signed in (`runware auth login`)
+runware-eval estimate bench.yaml --round smoke
+runware-eval run      bench.yaml --round smoke      # first input, first seed, every recipe
+runware-eval run      bench.yaml --round full       # everything, stops before passing the budget
+runware-eval report   bench.yaml --round full --notes notes.json
+```
+
+Results are cached per task, so re-running only pays for what is new. Each run folder ends with a
+single `report.html`.
 
 ## License
 

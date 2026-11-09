@@ -17,6 +17,30 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `seeds` | Seeds per recipe, to measure consistency. |
 | `recipes` | Each: `id`, `model` (AIR), `params` (exact schema field names), `mask` (region and polarity), `notes` (every convention translated). |
 
+## Placeholders in recipe `params`
+
+| Placeholder | Becomes |
+|---|---|
+| `$input` | the input's media URL (uploaded once by the runner, recorded in `media.lock.json`) |
+| `$input.width`, `$input.height` | input size, adjusted by the recipe's `size` block |
+| `$seed` | the current seed |
+| `$prompts.<name>` | a prompt from the top-level `prompts` block |
+| `$<name>` | URL of a top-level media entry, e.g. `lighting_ref: { path: refs/light.png }` |
+
+URLs are sent, not media UUIDs: some provider-backed models fail to fetch a UUID.
+
+A recipe's `size` block fits the input to a model's limits: `size: { multiple: 16, max_side: 2048,
+max_mp: 4.19 }`. Check each schema for its own limits and write them here.
+
+## Other optional fields
+
+- `label:` on any metric gives it a readable column name in the report.
+- `title:` (top level) is the report's heading.
+- `report: { x: cost, y: "Colour" }` picks the trade-off chart's axes, by metric label or `cost`.
+  Default: cost against the first colour check.
+- Avoid YAML 1.1 surprises: keys like `on:`, `off:`, `yes:` are read as booleans by many parsers.
+  The runner corrects them, but other tools may not.
+
 ## Example
 
 ```yaml

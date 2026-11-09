@@ -162,23 +162,30 @@ Map each recipe's parameters from its own schema. Record every convention you ha
 Write `bench.yaml` following `references/bench-format.md`. The file is the deliverable: it must be
 re-runnable later without an agent, and adding a new model must mean adding one recipe.
 
-## Step 5 — Cost, smoke round, hand-off
+## Step 5 — Cost, smoke round, full run, report
 
-1. Estimate cost: inputs × recipes × seeds × price. If the runner is installed, use
-   `runware-eval estimate bench.yaml` (it sends `X-Runware-Dry-Run: 1`, which prices a request without
-   running it). Otherwise say the figure comes from listed prices. Never exceed the cap.
-2. With the user's OK, run a **smoke round**: one input × every recipe via the MCP `run` tool. Look at
-   every output for inverted masks, cropping and ignored instructions, and fix the recipes before
-   spending more.
-3. **Record cost and latency for every task** (`includeCost: true`, plus wall time). They are always
-   measured; if they are missing, say so in the report rather than substituting listed prices silently.
-4. **Finish with the HTML report, not loose images.** After scoring, run
-   `python runner/report.py <bench_dir> <input> <outputs_dir> --notes <notes.json>`. It writes one
-   self-contained page: verdict, the trade-off chart, gate-by-gate table, before/after slider, colour
-   heatmap, logo crops and the full data. Put your reading of the results (what passed, what is
-   misleading, what to change in round 2) in `notes.json` as `findings` and `caveats`.
-5. Full run and scoring: `runware-eval run bench.yaml`. If the runner is not installed, stop after the
-   smoke round and its report, and tell the user the bench is ready and what remains.
+The runner does the paid work. Install it once from this repo: `pip install -e runner` (if the
+`runware-eval` command is not on PATH, use `python -m runware_eval`). It signs in with the CLI login.
+Every command takes `--out <folder>`; results there are cached, so nothing is ever paid for twice.
+
+1. **Estimate:** `runware-eval estimate bench.yaml --round smoke`. Costs are *measured* averages from
+   earlier runs in that folder, otherwise the highest *listed* price in the model's schema. Runware has
+   no reliable dry-run (the `X-Runware-Dry-Run` header executed and billed in testing), so never
+   promise a free price check. Show the user the table and get a yes.
+2. **Smoke round:** `runware-eval run bench.yaml --round smoke` (first input, first seed, every
+   recipe). It records real cost and latency per task, masks every output and writes the report.
+   Look at every output for inverted masks, cropping and ignored instructions; fix recipes first.
+3. **Full run:** `runware-eval estimate bench.yaml --round full` (now with measured costs), then, with
+   the user's OK, `runware-eval run bench.yaml --round full`. It stops before starting if the projected
+   total would pass `budget.max_usd`.
+4. **Report:** `runware-eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
+   verdict, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
+   region crops, gallery and all data, in one file. Put your reading of the results (what passed, what
+   is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
+   report, not loose images.
+
+Metrics marked `planned` in the registry (vision-model judges, OCR, human ranking) show as *not run*
+in the report. Say so; never present them as passed.
 
 **Before reporting, check the gates against the outputs.** A gate that every recipe fails, or one that
 passes something visibly wrong (e.g. a hue-only backdrop check passing a black backdrop), is
@@ -193,7 +200,7 @@ mis-specified: fix or demote it, and say so in the caveats.
 | "I'll search the community catalog for edit models" | `model_search` is community fine-tunes. Use `list_models` by capability. |
 | "I'll write custom scripts for this user" | Write `bench.yaml`. A one-off script is not a bench. |
 | "I'll loop `run` over the whole grid in chat" | The MCP is for setup and the smoke round. The runner executes. |
-| "List price × N is close enough" | Use the dry-run estimate when available, and say which one you used. |
+| "I'll dry-run it to get a free price" | Dry-run is unreliable on Runware. Estimate from measured smoke costs, and say which numbers are listed. |
 | "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
 | "Inputs are URLs / already uploaded, so I can skip one of the two" | Step 0 needs both every time: the runner uses the CLI login. |
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
@@ -211,6 +218,6 @@ mis-specified: fix or demote it, and say so in the caveats.
 
 ## Related skills
 
-`runware-models` (catalog lookup), `runware-run` (execution contract and dry-run), `edit-image`,
+`runware-models` (catalog lookup), `runware-run` (execution contract), `edit-image`,
 `product-photography`, `character-consistency`, `text-in-image` (the outcomes this bench evaluates),
 and the `migrate` skills (use a bench to prove a migrated recipe did not regress).
