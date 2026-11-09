@@ -5,6 +5,7 @@ one task can turn a whole multi-task response into an error and hide the other r
 """
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -47,16 +48,59 @@ def post(tasks, timeout=180):
     return body.get("data", []), body.get("errors", [])
 
 
+def _transient(exc):
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError)) or (
+        isinstance(exc, RunwareError) and re.search(r"HTTP (429|5\d\d)", str(exc)))
+
+
+def _error_text(e):
+    """The provider's own explanation is often in responseContent; keep it."""
+    msg = e.get("message", "unknown error")
+    extra = e.get("responseContent") or e.get("parameter")
+    return f"{msg} {extra}".strip() if extra else msg
+
+
+def _poll(uid, tries=4):
+    """getResponse with retries on transient errors (polling never bills)."""
+    for i in range(tries):
+        try:
+            return post([{"taskType": "getResponse", "taskUUID": uid}])
+        except Exception as exc:  # noqa: BLE001
+            if not _transient(exc) or i == tries - 1:
+                raise
+            time.sleep(3 * (i + 1))
+
+
+def _submit(task, tries=3):
+    """Submit once. On a transient failure, first ask whether the task exists (it may have been
+    accepted before the error); re-submit only if Runware has no trace of it, so nothing bills twice."""
+    for i in range(tries):
+        try:
+            return post([task])
+        except Exception as exc:  # noqa: BLE001
+            if not _transient(exc) or i == tries - 1:
+                raise
+            time.sleep(5 * (i + 1))
+            try:
+                data, errors = _poll(task["taskUUID"], tries=2)
+                if data:
+                    return data, errors
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def run_task(task, poll_every=3.0, max_wait=900):
-    """Send one task and wait for a terminal result. Never re-sends: a re-send would bill twice."""
+    """Send one task and wait for a terminal result. Never re-sends a task Runware already has."""
     t0 = time.time()
-    data, errors = post([task])
     uid = task["taskUUID"]
+    try:
+        data, errors = _submit(task)
+    except Exception as exc:  # noqa: BLE001  one task's failure must not stop a run
+        return {"status": "error", "error": f"submit failed: {exc}", "latency_s": round(time.time() - t0, 1)}
     while True:
         err = next((e for e in errors if e.get("taskUUID") in (uid, None)), None)
         if err:
-            return {"status": "error", "error": err.get("message", "unknown error"),
-                    "latency_s": round(time.time() - t0, 1)}
+            return {"status": "error", "error": _error_text(err), "latency_s": round(time.time() - t0, 1)}
         item = next((d for d in data if d.get("taskUUID") == uid), None)
         if item and item.get("status") not in ("processing", "pending") and any(
                 k in item for k in ("imageURL", "videoURL", "audioURL", "text", "outputs")):
@@ -68,7 +112,10 @@ def run_task(task, poll_every=3.0, max_wait=900):
             return {"status": "error", "error": f"timed out after {max_wait}s",
                     "latency_s": round(time.time() - t0, 1)}
         time.sleep(poll_every)
-        data, errors = post([{"taskType": "getResponse", "taskUUID": uid}])
+        try:
+            data, errors = _poll(uid)
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": f"polling failed: {exc}", "latency_s": round(time.time() - t0, 1)}
 
 
 def download(url, path):

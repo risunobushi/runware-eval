@@ -9,6 +9,9 @@ dependencies = [
   "pyyaml",
   "opencv-python-headless",
   "scikit-image",
+  "scipy",
+  "trimesh",
+  "pyvista",
 ]
 
 [project.scripts]

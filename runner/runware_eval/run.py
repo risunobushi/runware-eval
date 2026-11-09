@@ -233,15 +233,19 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
         row.update(taskUUID=j["task"]["taskUUID"], status=res["status"], cost=res.get("cost"),
                    latency_s=res.get("latency_s"), error=res.get("error"))
         if res["status"] == "success":
-            url = res.get("imageURL") or res.get("videoURL")
+            files = (res.get("outputs") or {}).get("files") or []
+            url = res.get("imageURL") or res.get("videoURL") or (files[0]["url"] if files else None)
+            if not url:
+                return {**row, "status": "error", "error": "no output URL in the response"}
             ext = os.path.splitext(url.split("?")[0])[1] or ".png"
             row["file"] = f"{j['input']}__{j['recipe']}__s{j['seed']}{ext}"
             row["url"] = url
             api.download(url, os.path.join(out_dir, row["file"]))
-            try:
-                row["eval_cost"] = mask_from(url, os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
-            except RuntimeError as e:
-                row["mask_error"] = str(e)
+            if ext.lower() in (".png", ".jpg", ".jpeg", ".webp"):  # 3D outputs get masks from their renders
+                try:
+                    row["eval_cost"] = mask_from(url, os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
+                except RuntimeError as e:
+                    row["mask_error"] = str(e)
         return row
 
     def report(row):
@@ -251,10 +255,19 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
         extra = f" ({'; '.join(row['steps'])})" if row.get("steps") else ""
         log(f"  {row['input']} · {row['recipe']} · s{row['seed']}: {status}{extra}")
 
+    def safe(fn):
+        def wrapped(j):
+            try:
+                return fn(j)
+            except Exception as exc:  # noqa: BLE001  one output's failure must not stop the run
+                return {**{k: j.get(k) for k in ("input", "recipe", "seed", "model", "fp", "hash")},
+                        "status": "error", "error": f"{type(exc).__name__}: {exc}", "cost": None, "latency_s": None}
+        return wrapped
+
     plain = [j for j in todo if not j.get("base_hash")]
     piped = [j for j in todo if j.get("base_hash")]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for row in pool.map(one, plain):
+        for row in pool.map(safe(one), plain):
             report(row)
     if piped:
         # plain results first, so pipelines can start from the very same base image
@@ -265,7 +278,7 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
                         and os.path.exists(os.path.join(d, r["file"])):
                     bases.setdefault(r["hash"], (d, r["file"], r.get("url"), r.get("cost")))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for row in pool.map(lambda j: run_pipeline(j, b, out_dir, bases, lock_path), piped):
+            for row in pool.map(safe(lambda j: run_pipeline(j, b, out_dir, bases, lock_path)), piped):
                 report(row)
     return read_results(out_dir)
 

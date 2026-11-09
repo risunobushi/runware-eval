@@ -18,6 +18,7 @@ from skimage.metrics import structural_similarity
 from concurrent.futures import ThreadPoolExecutor
 
 from . import judge as judge_mod
+from . import render as render_mod
 from .bench import stem
 
 
@@ -149,14 +150,23 @@ def _lum_crop(p, region, side_rgb):
 
 
 def m_detail_similarity(p, opt):
-    """Illumination-invariant similarity of fine detail (lettering, stitching) inside a region:
-    normalised cross-correlation of the high-pass luminance layers. 1 = same detail, ~0 = unrelated."""
-    sigma = opt.get("sigma_px", 3)
-    a, m = _lum_crop(p, opt["region"], p.rgb_in)
-    b, _ = _lum_crop(p, opt["region"], p.rgb_out)
-    ha, hb = a - cv2.GaussianBlur(a, (0, 0), sigma), b - cv2.GaussianBlur(b, (0, 0), sigma)
-    ha, hb = ha[m] - ha[m].mean(), hb[m] - hb[m].mean()
-    return {"value": float((ha * hb).sum() / (np.sqrt((ha ** 2).sum() * (hb ** 2).sum()) + 1e-9))}
+    """Illumination-invariant similarity of fine detail (lettering, stitching) inside a region: the
+    best normalised cross-correlation of the high-pass luminance layers over small offsets (up to
+    `search_px`, default 24), so outputs that are not pixel-aligned (re-framed images, 3D renders)
+    are compared fairly. 1 = same detail, ~0 = unrelated."""
+    sigma, pad = opt.get("sigma_px", 3), int(opt.get("search_px", 24))
+    m = p.region(opt["region"])
+    ys, xs = np.nonzero(m)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    hp = lambda L: (L - cv2.GaussianBlur(L, (0, 0), sigma)).astype(np.float32)
+    a = hp(p.lab_in[..., 0])[y0:y1, x0:x1]
+    Y0, Y1, X0, X1 = max(0, y0 - pad), min(p.H, y1 + pad), max(0, x0 - pad), min(p.W, x1 + pad)
+    b = hp(p.lab_out[..., 0])[Y0:Y1, X0:X1]
+    if b.shape[0] < a.shape[0] or b.shape[1] < a.shape[1] or a.std() < 1e-6:
+        return {"value": float("nan")}
+    res = cv2.matchTemplate(b, a, cv2.TM_CCOEFF_NORMED)
+    _, best, _, loc = cv2.minMaxLoc(res)
+    return {"value": float(best), "offset_px": [int(loc[0] - (x0 - X0)), int(loc[1] - (y0 - Y0))]}
 
 
 def m_keypoint_match(p, opt):
@@ -207,6 +217,22 @@ def m_seam_jump(p, opt):
     return {"value": out_j - in_j, "output_step": out_j, "original_step": in_j}
 
 
+def m_bbox_aspect(p, opt):
+    """Proportions: relative difference between the width/height ratios of the product's bounding box."""
+    def ratio(m):
+        ys, xs = np.nonzero(m)
+        return (xs.max() - xs.min() + 1) / (ys.max() - ys.min() + 1)
+    spec = opt.get("region", "product")
+    return {"value": float(abs(ratio(p.region(spec, "out")) / ratio(p.region(spec)) - 1))}
+
+
+def _mesh(p, key):
+    if not getattr(p, "mesh", None):
+        raise KeyError("not a 3D output")
+    v = p.mesh[key]
+    return {"value": float(v) if not isinstance(v, bool) else (1.0 if v else 0.0)}
+
+
 def m_sharpness_laplacian(p, opt):
     def sharp(rgb, m):
         g = cv2.cvtColor((rgb * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
@@ -253,7 +279,10 @@ METRICS = {
     "size_aspect": m_size_aspect, "phase_correlation": m_phase_correlation, "mask_iou": m_mask_iou,
     "deltaE2000_region": m_deltaE2000_region, "ssim_region": m_ssim_region,
     "sharpness_laplacian": m_sharpness_laplacian, "detail_similarity": m_detail_similarity,
-    "keypoint_match": m_keypoint_match, "seam_jump": m_seam_jump,
+    "keypoint_match": m_keypoint_match, "seam_jump": m_seam_jump, "bbox_aspect": m_bbox_aspect,
+    "mesh_faces": lambda p, o: _mesh(p, "faces"), "mesh_watertight": lambda p, o: _mesh(p, "watertight"),
+    "mesh_parts": lambda p, o: _mesh(p, "parts"), "mesh_texture_px": lambda p, o: _mesh(p, "texture_px"),
+    "mesh_file_mb": lambda p, o: _mesh(p, "file_mb"),
 }
 COPY_SENSITIVE = ("detail_similarity", "ssim_region", "deltaE2000_region")
 
@@ -380,7 +409,30 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
     for f in files:
         fname = os.path.basename(f)
         inp, recipe, seed = OUT_RE.match(fname).groups()
-        p = Pair(b, inputs[inp], f, find_mask(out_dir, fname, recipe))
+        view = None
+        if render_mod.is_mesh(f):
+            # render adapter: the mesh becomes a front view on the input's canvas, so image checks apply
+            os.makedirs(os.path.join(out_dir, "renders"), exist_ok=True)
+            stem_ = fname.rsplit(".", 1)[0]
+            vpng = os.path.join(out_dir, "renders", stem_ + "__front.png")
+            vmask = os.path.join(out_dir, "renders", stem_ + "__front_cut.png")
+            vjson = os.path.join(out_dir, "renders", stem_ + "__view.json")
+            if not os.path.exists(vjson):
+                ip = inputs[inp]
+                src = os.path.join(b["_dir"], ip["path"])
+                rgb = np.asarray(Image.open(src).convert("RGB"))
+                tm = input_region(b, ip, "product")
+                bg = np.median(rgb[~tm], axis=0) if (~tm).any() else (255, 255, 255)
+                log(f"  rendering {fname}: searching the view that matches the photo ...")
+                info = render_mod.front_view(f, tm, bg, vpng, vmask)
+                info["mesh"] = render_mod.mesh_facts(f)
+                render_mod.turntable(f, os.path.join(out_dir, "renders", stem_ + "__turntable.jpg"))
+                json.dump(info, open(vjson, "w"))
+            view = json.load(open(vjson))
+            p = Pair(b, inputs[inp], vpng, vmask)
+            p.mesh = view["mesh"]
+        else:
+            p = Pair(b, inputs[inp], f, find_mask(out_dir, fname, recipe))
         jobs = [] if panel else None
         metrics = score_pair(b, p, jobs, recipes_by_id.get(recipe))
         fails = pixel_fails(metrics)
@@ -398,9 +450,15 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
             prepared = judge_mod.prepare(g["pair"], {"region": region, "refs": g["refs"]}, b)
             pending.append((g["items"], prepared))
         r = ops.get(fname, {})
-        scored.append({"input": inp, "recipe": recipe, "seed": int(seed), "file": fname,
-                       "native": f"{p.native[0]}x{p.native[1]}", "cost": r.get("cost"),
-                       "latency_s": r.get("latency_s"), "metrics": metrics})
+        entry = {"input": inp, "recipe": recipe, "seed": int(seed), "file": fname,
+                 "native": f"{p.native[0]}x{p.native[1]}", "cost": r.get("cost"),
+                 "latency_s": r.get("latency_s"), "metrics": metrics}
+        if view:
+            stem_ = fname.rsplit(".", 1)[0]
+            entry.update(view=f"renders/{stem_}__front.png", view_mask=f"renders/{stem_}__front_cut.png",
+                         turntable=f"renders/{stem_}__turntable.jpg", view_info=view,
+                         native=f"{view['mesh']['faces']:,} faces")
+        scored.append(entry)
     if pending:
         # budget check after the pixel funnel: only outputs that will actually be judged count
         calls = len(pending) * len(panel.judges)

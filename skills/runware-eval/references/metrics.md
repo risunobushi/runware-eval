@@ -114,6 +114,26 @@ and every `vlm_*` question for one output goes into ONE call per judge. Ask judg
 check covers (reference leakage, "reads as a real photo", same product overall, aesthetics). On the
 bag, 1 of 18 outputs reached the judges: $0.006 instead of $0.88.
 
+## 3D outputs (GLB)
+
+The runner renders every 3D output with a render adapter: it searches 144 views (yaw x elevation x
+up-axis) for the silhouette that best matches the input's product mask, renders that view unlit and
+places it on the input's canvas, so every image check above applies unchanged. A 4-view turntable
+goes into the report. Mesh checks read the file itself:
+
+| id | unit | notes |
+|---|---|---|
+| `mesh_faces` | faces | triangles in all geometries |
+| `mesh_parts` | count | connected components; thousands means a fragmented mesh |
+| `mesh_watertight` | 1 / 0 | closed surface (needed for 3D printing, some engines) |
+| `mesh_texture_px` | px | largest base-colour texture; 0 = untextured |
+| `mesh_file_mb` | MB | GLB size |
+| `bbox_aspect` | ratio error | proportions of the silhouette vs the input (images too) |
+
+`detail_similarity` searches small offsets (default ±24 px) before comparing, so re-framed images
+and 3D renders are compared fairly. Tested on the bag: no 3D model reproduced the logo lettering
+(0.02–0.30 vs 0.995 for intact letters), which matched the crops.
+
 ## Ops — always on
 
 | id | unit | source |

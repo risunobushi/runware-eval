@@ -50,6 +50,7 @@ function show(){
     document.getElementById('kv').innerHTML = '<dt>No output for this combination.</dt>'; return; }
   ba.querySelector('.after img').src = r.img; ba.querySelector('.tag.r').textContent = cur.recipe;
   document.getElementById('heat').src = r.heat || '';
+  const tp = document.getElementById('turn-panel'); tp.hidden = !r.turn; if (r.turn) document.getElementById('turn').src = r.turn;
   const co = document.getElementById('crop-out'); if (co) { co.src = r.crop || ''; document.getElementById('crop-out-cap').textContent = cur.recipe; }
   document.getElementById('kv').innerHTML = r.gates.map(g =>
     `<dt>${g.label}</dt><dd class="mono">${g.value}</dd><dd>${chip(g.pass)}</dd>`).join('');
@@ -232,8 +233,11 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             originals[k]["crop"] = uri(rgb_in[box[1]:box[3], box[0]:box[2]], 360, 90)
             originals[k]["crop_name"] = next(iter(boxes))
     for s in scored:
-        f = os.path.join(out_dir, s["file"])
-        p = Pair(b, inputs[s["input"]], f, find_mask(out_dir, s["file"], s["recipe"]))
+        if s.get("view"):  # 3D output: show its rendered front view
+            p = Pair(b, inputs[s["input"]], os.path.join(out_dir, s["view"]), os.path.join(out_dir, s["view_mask"]))
+        else:
+            f = os.path.join(out_dir, s["file"])
+            p = Pair(b, inputs[s["input"]], f, find_mask(out_dir, s["file"], s["recipe"]))
         it = {"img": uri(p.rgb_out, 900), "thumb": uri(p.rgb_out, 360, 80), "gates": gate_rows(s)}
         try:
             it["heat"] = uri(heatmap(p, first_de), 520)
@@ -242,6 +246,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         box = next(iter(p.boxes.values()), None)
         if box:
             it["crop"] = uri(p.rgb_out[box[1]:box[3], box[0]:box[2]], 360, 90)
+        if s.get("turntable") and os.path.exists(os.path.join(out_dir, s["turntable"])):
+            it["turn"] = uri(Image.open(os.path.join(out_dir, s["turntable"])).convert("RGB"), 900, 82)
         key = f"{s['input']}|{s['recipe']}"
         if key not in items or s["seed"] < items[key]["_seed"]:
             items[key] = {**it, "_seed": s["seed"]}
@@ -362,6 +368,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         out.append(f"<div class='panel'><h3>{e(crop_name.capitalize())}</h3><div class='pair'><figure><img id='crop-in' "
                    "alt='Original crop'><figcaption>original</figcaption></figure><figure><img id='crop-out' "
                    "alt='Output crop'><figcaption id='crop-out-cap'></figcaption></figure></div></div>")
+    out.append("<div class='panel' id='turn-panel' hidden><h3>All around (0°, 90°, 180°, 270°)</h3>"
+               "<img id='turn' alt='Turntable views of the 3D model'></div>")
     out.append("<div class='panel'><h3>Checks</h3><dl class='kv' id='kv'></dl></div></div></div></section>")
 
     # gallery
