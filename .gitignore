@@ -17,3 +17,6 @@ __pycache__/
 # os
 .DS_Store
 Thumbs.db
+
+# build leftovers
+build/

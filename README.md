@@ -39,17 +39,20 @@ changing my product?"* The skill will:
 
 ## Runner
 
+Runs through [uv](https://docs.astral.sh/uv/), so nothing is installed into your Python and no admin
+rights are needed. Needs the Runware CLI signed in (`runware auth login`).
+
 ```
-pip install --no-deps -e runner            # needs the Runware CLI signed in (`runware auth login`)
-python -m runware_eval estimate bench.yaml --round smoke
-python -m runware_eval run      bench.yaml --round smoke      # first input, first seed, every recipe
-python -m runware_eval run      bench.yaml --round full       # everything, stops before passing the budget
-python -m runware_eval report   bench.yaml --round full --notes notes.json
+uv run --project runner runware-eval estimate bench.yaml --round smoke
+uv run --project runner runware-eval run      bench.yaml --round smoke   # first input, first seed
+uv run --project runner runware-eval run      bench.yaml --round full    # stops before passing the budget
+uv run --project runner runware-eval report   bench.yaml --round full --notes notes.json
 ```
 
-`python -m runware_eval` works without admin rights; the `runware-eval` shortcut needs write
-access to Python's `Scripts` folder. Results are cached per task, so re-running only pays for what is new. Each run folder ends with a
-single `report.html`.
+Without cloning: `uvx --from "git+https://github.com/risunobushi/runware-eval#subdirectory=runner" runware-eval …`
+
+The first run builds the environment (about a minute); later runs reuse it. Results are cached per
+task, so re-running only pays for what is new. Each run folder ends with a single `report.html`.
 
 ## License
 

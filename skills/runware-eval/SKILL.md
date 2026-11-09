@@ -18,16 +18,18 @@ of good. The agent's job is setup and judgement. Execution belongs to the runner
 **Core rule: the user decides what "good" means; the catalog decides what is possible.** Never pick
 metrics before asking, and never claim what a model can or cannot do without reading its schema.
 
-## Step 0 — Preflight: Runware MCP and Runware CLI, before anything else
+## Step 0 — Preflight: Runware MCP, Runware CLI and uv, before anything else
 
-The bench needs both, every time. Check them before any other step, including the existing-bench
-question, and do not continue until both are ready. Do not substitute guessed REST calls, web
+The bench needs all three, every time. Check them before any other step, including the
+existing-bench question, and do not continue until all are ready. Do not substitute guessed REST calls, web
 searches, or model knowledge from memory.
 
 - **Runware MCP**: catalog discovery, schemas, pricing and the smoke round.
 - **Runware CLI**: uploads local files at full size (the hosted MCP runs on Runware's servers and
   cannot read them), and gives the runner its login (the MCP's browser sign-in does not extend to
   scripts).
+- **uv**: runs the bench runner in its own isolated environment. Nothing is installed into the
+  user's Python, so no admin rights, PATH changes or dependency clashes.
 
 ### 1. Check both (read-only)
 
@@ -35,13 +37,14 @@ searches, or model knowledge from memory.
 |---|---|---|
 | MCP | Tools such as `list_models`, `model_schema`, `run` exist in this session (e.g. `mcp__runware__list_models`) | `claude mcp list` shows `runware`: added, not connected or signed in. Not listed: missing. |
 | CLI | `runware auth status` prints a table whose `Status` row is `valid` | Command not found: missing. Any other `Status` value (e.g. `not configured`): installed, not signed in. |
+| uv | `uv --version` prints a version | Command not found: missing. |
 
 Read-only looks at the working folder (e.g. for an existing `bench.yaml`) are fine during this step.
 Show the user this status in two lines, then fix what is missing.
 
 ### 2. Install what is missing, yourself (the user approves each command)
 
-Install the CLI first: it needs no restart. Then the MCP.
+Install the CLI and uv first: neither needs a restart or admin rights. Then the MCP.
 
 - **CLI**
   - Windows with scoop: `scoop bucket add runware https://github.com/Runware/scoop-bucket.git` then
@@ -49,6 +52,11 @@ Install the CLI first: it needs no restart. Then the MCP.
   - macOS: `brew install --cask runware/tap/runware`
   - Linux: `curl -fsSL https://cli.runware.ai/install.sh | sh`
   - If `runware` is still not found, call it by its full path (e.g. `~/scoop/shims/runware`).
+- **uv** (user-level installers, no admin)
+  - Windows: `scoop install uv`, or without scoop
+    `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+  - macOS: `brew install uv`
+  - Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **MCP** (Claude Code): `claude mcp add --transport http runware https://mcp.runware.ai`. Skip the
   add if `claude mcp list` already shows it. Other clients, or no shell: give the user the URL
   `https://mcp.runware.ai` and where it goes in that client's MCP settings.
@@ -69,7 +77,7 @@ existing-bench question below; otherwise Step 1 question 1 (goal and inputs). No
 
 ### 4. Re-check both
 
-When they say continue, run the checks in part 1 again. Proceed only when both are ready.
+When they say continue, run the checks in part 1 again. Proceed only when all three are ready.
 
 Urgency ("I'm in a hurry", "just get going") is not declining. Only if the user explicitly declines
 the MCP: read the public catalog at `https://runware.ai/docs/models/index.json` and each model's
@@ -164,24 +172,29 @@ re-runnable later without an agent, and adding a new model must mean adding one 
 
 ## Step 5 — Cost, smoke round, full run, report
 
-The runner does the paid work. Install it once from this repo: `pip install --no-deps -e runner`
-(add the listed dependencies if missing). Always call it as `python -m runware_eval …`: it works
-without admin rights, whereas the `runware-eval` shortcut needs write access to Python's `Scripts`
-folder, which system-wide installs often deny. If pip prints "Failed to write executable", the package
-is still installed; only the shortcut is missing. It signs in with the CLI login.
+The runner does the paid work. Do not `pip install` it. Run it through uv, which builds an isolated
+environment on first use (about a minute) and reuses it afterwards:
+
+`uv run --project <runner> runware-eval …`
+
+`<runner>` is the `runner/` folder of the runware-eval repo. Installed as a plugin, it sits next to
+`skills/`: two levels above this skill's base directory, then `runner`. Otherwise look for a
+`runware-eval/runner/pyproject.toml` in the working folder. If the repo is not on disk at all,
+use `uvx --from "git+https://github.com/risunobushi/runware-eval#subdirectory=runner" runware-eval …`
+instead. The runner signs in with the CLI login.
 Every command takes `--out <folder>`; results there are cached, so nothing is ever paid for twice.
 
-1. **Estimate:** `python -m runware_eval estimate bench.yaml --round smoke`. Costs are *measured* averages from
+1. **Estimate:** `uv run --project <runner> runware-eval estimate bench.yaml --round smoke`. Costs are *measured* averages from
    earlier runs in that folder, otherwise the highest *listed* price in the model's schema. Runware has
    no reliable dry-run (the `X-Runware-Dry-Run` header executed and billed in testing), so never
    promise a free price check. Show the user the table and get a yes.
-2. **Smoke round:** `python -m runware_eval run bench.yaml --round smoke` (first input, first seed, every
+2. **Smoke round:** `uv run --project <runner> runware-eval run bench.yaml --round smoke` (first input, first seed, every
    recipe). It records real cost and latency per task, masks every output and writes the report.
    Look at every output for inverted masks, cropping and ignored instructions; fix recipes first.
-3. **Full run:** `python -m runware_eval estimate bench.yaml --round full` (now with measured costs), then, with
-   the user's OK, `python -m runware_eval run bench.yaml --round full`. It stops before starting if the projected
+3. **Full run:** `uv run --project <runner> runware-eval estimate bench.yaml --round full` (now with measured costs), then, with
+   the user's OK, `uv run --project <runner> runware-eval run bench.yaml --round full`. It stops before starting if the projected
    total would pass `budget.max_usd`.
-4. **Report:** `python -m runware_eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
+4. **Report:** `uv run --project <runner> runware-eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
    verdict, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
    region crops, gallery and all data, in one file. Put your reading of the results (what passed, what
    is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
@@ -205,7 +218,8 @@ mis-specified: fix or demote it, and say so in the caveats.
 | "I'll loop `run` over the whole grid in chat" | The MCP is for setup and the smoke round. The runner executes. |
 | "I'll dry-run it to get a free price" | Dry-run is unreliable on Runware. Estimate from measured smoke costs, and say which numbers are listed. |
 | "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
-| "Inputs are URLs / already uploaded, so I can skip one of the two" | Step 0 needs both every time: the runner uses the CLI login. |
+| "Inputs are URLs / already uploaded, so I can skip one of the three" | Step 0 needs all three every time: the runner uses the CLI login and runs through uv. |
+| "I'll `pip install` the runner" | Never into the user's Python. Run it through uv. |
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
 | "I'll ask for the key so I can run `runware auth login --key`" | Never. The user signs in at the CLI prompt in their own terminal. |
 | "There's already a bench for this; I'll pick up where it left off" | Mention it and ask. A new request is a new bench unless the user says otherwise. |
