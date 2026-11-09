@@ -53,6 +53,23 @@ the MCP: read the public catalog at
 `https://runware.ai/docs/models/index.json` and each model's `schema` URL, and say that the bench
 is being set up in read-only mode.
 
+### Local input files
+
+The hosted MCP runs on Runware's servers, so it cannot read local files, and its browser sign-in
+does not extend to scripts or the runner. Getting local inputs to Runware, in order of preference:
+
+1. **Runware CLI** (no key in chat or in project files). The user runs this in their own terminal:
+   install it (`scoop install runware` after `scoop bucket add runware
+   https://github.com/Runware/scoop-bucket.git` on Windows, `brew install --cask runware/tap/runware`
+   on macOS, `curl -fsSL https://cli.runware.ai/install.sh | sh` on Linux), then `runware auth login`.
+   You then upload with `runware media upload <file> -F json` and use the returned `mediaUUID` in
+   MCP calls and in `bench.yaml`. The runner reuses the CLI login.
+2. **Public URLs** the user already hosts.
+3. **Inline base64 through the MCP**: only for one small image in a pinch. It fills the
+   conversation and forces downscaling.
+
+Do not ask the user to create a `.env` file while the CLI route is available.
+
 ## Step 1 — Intake: ask what to evaluate
 
 Ask in this order and wait for answers. If the user has already answered part of a question, ask
@@ -129,8 +146,19 @@ re-runnable later without an agent, and adding a new model must mean adding one 
 2. With the user's OK, run a **smoke round**: one input × every recipe via the MCP `run` tool. Look at
    every output for inverted masks, cropping and ignored instructions, and fix the recipes before
    spending more.
-3. Full run and scoring: `runware-eval run bench.yaml`. If the runner is not installed, stop after the
-   smoke round, and tell the user the bench is ready and what remains.
+3. **Record cost and latency for every task** (`includeCost: true`, plus wall time). They are always
+   measured; if they are missing, say so in the report rather than substituting listed prices silently.
+4. **Finish with the HTML report, not loose images.** After scoring, run
+   `python runner/report.py <bench_dir> <input> <outputs_dir> --notes <notes.json>`. It writes one
+   self-contained page: verdict, the trade-off chart, gate-by-gate table, before/after slider, colour
+   heatmap, logo crops and the full data. Put your reading of the results (what passed, what is
+   misleading, what to change in round 2) in `notes.json` as `findings` and `caveats`.
+5. Full run and scoring: `runware-eval run bench.yaml`. If the runner is not installed, stop after the
+   smoke round and its report, and tell the user the bench is ready and what remains.
+
+**Before reporting, check the gates against the outputs.** A gate that every recipe fails, or one that
+passes something visibly wrong (e.g. a hue-only backdrop check passing a black backdrop), is
+mis-specified: fix or demote it, and say so in the caveats.
 
 ## Red flags — stop and correct
 
