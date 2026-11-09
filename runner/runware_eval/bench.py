@@ -103,8 +103,10 @@ def resolve(value, ctx):
         return ctx["input"]["_url"]
     if token == "seed":
         return ctx["seed"]
+    if token == "prev":
+        return ctx["prev"]
     if token == "mask":
-        url = ctx["input"].get("_masks", {}).get(ctx["recipe"]["id"])
+        url = ctx.get("mask_url") or ctx["input"].get("_masks", {}).get(ctx["recipe"]["id"])
         if not url:
             raise ValueError(f"Recipe {ctx['recipe']['id']} uses $mask but has no `mask:` block")
         return url
@@ -161,7 +163,12 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
                 params = resolve(r.get("params", {}), ctx)
                 task = {"taskType": r.get("taskType", "imageInference"), "model": r["model"], **params,
                         "includeCost": True}
+                base = content_key(b, task)
+                pipeline = bool(r.get("then") or r.get("post"))
+                key = base if not pipeline else hashlib.sha1(json.dumps(
+                    [base, r.get("_fp"), inp.get("regions")], sort_keys=True, default=str).encode()).hexdigest()[:20]
                 out.append({"input": stem(inp["path"]), "recipe": r["id"], "seed": seed,
-                            "model": r["model"], "fp": r.get("_fp"), "hash": content_key(b, task),
+                            "model": r["model"], "fp": r.get("_fp"), "hash": key,
+                            "base_hash": base if pipeline else None, "_inp": inp, "_recipe": r,
                             "task": {**task, "taskUUID": str(uuid.uuid4())}})
     return out

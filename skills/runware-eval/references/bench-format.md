@@ -80,6 +80,27 @@ Known limit (Ideogram 4.5 Precise Edit, tested): a small *keep* island inside a 
 not kept; the model regenerates it. A small *edit* area inside a black mask works pixel-exactly.
 Masks are reliable for "change only this", not for "change everything except this".
 
+## Multi-step recipes
+
+A recipe can continue after its first image:
+
+```yaml
+then:                       # a second task on the first output
+  model: ideogram:4.5@precise-edit
+  params: { inputs: { seedImage: $prev, maskImage: $mask, referenceImages: [$input] }, ... }
+post:                       # local steps, no API cost
+  - { transfer_detail: logo, sigma_px: 6, feather_px: 6 }   # new light, original fine detail
+  - { restore: logo, feather_px: 4 }                         # paste the original pixels back
+```
+
+`$prev` is the previous step's image; for a `then` step, `$mask` is redrawn at that image's size.
+If a plain recipe with the same first request exists, its image is reused as the first step, so
+the only difference between the two recipes is what comes after (fair comparisons, no double cost).
+
+Tested on a relight with a logo: `transfer_detail` brought the lettering back with the new light;
+`restore` was exact but visibly pasted; a masked `then` pass changed almost nothing. Pixel checks
+favour whichever method copies pixels, so judge these with the vision panel and your own eye.
+
 ## Other optional fields
 
 - `label:` on any metric gives it a readable column name in the report.

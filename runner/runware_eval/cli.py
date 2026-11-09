@@ -57,7 +57,8 @@ def cmd_run(a):
     jobs = bench.jobs(b, a.round, a.inputs, a.recipes)
     runs_root = os.path.join(b["_dir"], "runs")
     hist = [os.path.join(runs_root, d) for d in os.listdir(runs_root)] if os.path.isdir(runs_root) else []
-    results = run.execute(jobs, out, cap, history_dirs=hist + (a.history or []))
+    results = run.execute(jobs, out, cap, history_dirs=hist + (a.history or []), b=b,
+                          lock_path=os.path.join(out, "media.lock.json"))
     print(f"Done. Results in {out}")
     if not a.no_score:
         cmd_score(a, b, out, results)

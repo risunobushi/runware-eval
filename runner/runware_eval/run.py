@@ -5,6 +5,7 @@ import shutil
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -81,7 +82,114 @@ def reuse(j, src_dir, src, out_dir):
     return row
 
 
-def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=()):
+def restore(cur_path, inp_path, region, feather_px, out_path):
+    """Paste the original pixels of `region` back over the output, with a soft edge (no API call)."""
+    orig = Image.open(inp_path).convert("RGB")
+    W, H = orig.size
+    cur = Image.open(cur_path).convert("RGB").resize((W, H), Image.BICUBIC)
+    a = region.astype(np.float32)
+    if feather_px:
+        k = int(feather_px) * 2 + 1
+        a = cv2.GaussianBlur(a, (k, k), feather_px / 2)
+    a = a[..., None]
+    comp = a * np.asarray(orig, np.float32) + (1 - a) * np.asarray(cur, np.float32)
+    Image.fromarray(np.clip(comp, 0, 255).astype(np.uint8)).save(out_path)
+    return out_path
+
+
+def transfer_detail(cur_path, inp_path, region, sigma_px, feather_px, out_path):
+    """Frequency separation: inside `region`, keep the output's lighting (low frequencies) and put back
+    the original's fine detail (high frequencies: lettering, stitching). Local, no API call."""
+    orig = np.asarray(Image.open(inp_path).convert("RGB"), np.float32)
+    H, W = orig.shape[:2]
+    cur = np.asarray(Image.open(cur_path).convert("RGB").resize((W, H), Image.BICUBIC), np.float32)
+    blur = lambda x: cv2.GaussianBlur(x, (0, 0), sigma_px)
+    detail = blur(cur) + (orig - blur(orig))
+    a = region.astype(np.float32)
+    if feather_px:
+        a = cv2.GaussianBlur(a, (0, 0), feather_px / 2)
+    a = a[..., None]
+    comp = a * detail + (1 - a) * cur
+    Image.fromarray(np.clip(comp, 0, 255).astype(np.uint8)).save(out_path)
+    return out_path
+
+
+def run_pipeline(j, b, out_dir, bases, lock_path):
+    """Base generation (reused when an identical plain recipe already produced it), then the recipe's
+    `then` step (a second task on the first output) and `post` steps (local edits)."""
+    r, inp = j["_recipe"], j["_inp"]
+    row = {k: j[k] for k in ("input", "recipe", "seed", "model", "fp", "hash", "base_hash")}
+    row.update(status="success", cost=0.0, spend=0.0, latency_s=0.0, steps=[])
+    os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
+    stem_ = f"{j['input']}__{j['recipe']}__s{j['seed']}"
+    if j["base_hash"] in bases:
+        d, f, url, cost = bases[j["base_hash"]]
+        cur_path, cur_url = os.path.join(d, f), url
+        row["cost"] += cost or 0
+        row["steps"].append(f"base reused from {f}")
+    else:
+        res = api.run_task(j["task"])
+        if res["status"] != "success":
+            return {**row, "status": "error", "error": res.get("error")}
+        cur_url = res["imageURL"]
+        cur_path = os.path.join(out_dir, "steps", stem_ + "__base" + os.path.splitext(cur_url)[1])
+        api.download(cur_url, cur_path)
+        row["cost"] += res.get("cost") or 0
+        row["spend"] += res.get("cost") or 0
+        row["latency_s"] += res.get("latency_s") or 0
+        row["steps"].append("base generated")
+    if not cur_url:
+        cur_url = benchmod.upload(cur_path, os.path.abspath(cur_path), lock_path)["url"]
+    then = r.get("then")
+    if then:
+        ctx = {"bench": b, "input": inp, "recipe": r, "seed": j["seed"], "prev": cur_url}
+        if r.get("mask"):
+            w, h = Image.open(cur_path).size  # the mask must match the image it is applied to
+            edit_ = input_region(b, inp, r["mask"]["edit"])
+            white = edit_ if r["mask"].get("polarity", "white_is_edit") == "white_is_edit" else ~edit_
+            mpath = os.path.join(out_dir, "masks", stem_ + "__step2_mask.png")
+            Image.fromarray((white * 255).astype(np.uint8)).resize((w, h), Image.NEAREST).save(mpath)
+            ctx["mask_url"] = benchmod.upload(mpath, os.path.abspath(mpath), lock_path)["url"]
+        params = benchmod.resolve(then.get("params", {}), ctx)
+        task = {"taskType": then.get("taskType", "imageInference"), "taskUUID": str(uuid.uuid4()),
+                "model": then["model"], **params, "includeCost": True}
+        res = api.run_task(task)
+        if res["status"] != "success":
+            return {**row, "status": "error", "error": f"then-step: {res.get('error')}"}
+        cur_url = res["imageURL"]
+        cur_path = os.path.join(out_dir, "steps", stem_ + "__then" + os.path.splitext(cur_url)[1])
+        api.download(cur_url, cur_path)
+        row["cost"] += res.get("cost") or 0
+        row["spend"] += res.get("cost") or 0
+        row["latency_s"] += res.get("latency_s") or 0
+        row["steps"].append(f"then {then['model']}")
+    pre_post_url = cur_url
+    for step in r.get("post") or []:
+        if "transfer_detail" in step:
+            region = input_region(b, inp, step["transfer_detail"])
+            cur_path = transfer_detail(cur_path, os.path.join(b["_dir"], inp["path"]), region,
+                                       step.get("sigma_px", 6), step.get("feather_px", 6),
+                                       os.path.join(out_dir, "steps", stem_ + "__post.png"))
+            cur_url = None
+            row["steps"].append(f"transfer detail {step['transfer_detail']}")
+        if "restore" in step:
+            region = input_region(b, inp, step["restore"])
+            cur_path = restore(cur_path, os.path.join(b["_dir"], inp["path"]), region, step.get("feather_px", 4),
+                               os.path.join(out_dir, "steps", stem_ + "__post.png"))
+            cur_url = None
+            row["steps"].append(f"restore {step['restore']}")
+    row["file"] = stem_ + os.path.splitext(cur_path)[1]
+    shutil.copyfile(cur_path, os.path.join(out_dir, row["file"]))
+    row["url"] = cur_url
+    try:  # product outline: post steps only touch small regions, so the pre-post image is used
+        row["eval_cost"] = mask_from(pre_post_url, os.path.join(out_dir, "masks", stem_ + "_cut.png"))
+    except RuntimeError as e:
+        row["mask_error"] = str(e)
+    row["latency_s"] = round(row["latency_s"], 1)
+    return row
+
+
+def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=None, lock_path=None):
     os.makedirs(os.path.join(out_dir, "masks"), exist_ok=True)
     results = read_results(out_dir)
     done = {r["hash"] for r in results if r.get("status") == "success"
@@ -97,7 +205,8 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=()):
         log(f"Reused {reused} matching result(s) from earlier runs (same recipe fingerprint, inputs and seed).")
         results = read_results(out_dir)
     todo = [j for j in jobs if j["hash"] not in done]
-    spent = sum((r.get("cost") or 0) + (r.get("eval_cost") or 0) for r in results if not r.get("reused_from"))
+    spent = sum((r.get("spend", r.get("cost")) or 0) + (r.get("eval_cost") or 0)
+                for r in results if not r.get("reused_from"))
     est = estimate(todo, results)
     unknown = [e["recipe"] for e in est if e["est_cost"] is None]
     projected = sum(e["est_cost"] or 0 for e in est)
@@ -126,12 +235,29 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=()):
                 row["mask_error"] = str(e)
         return row
 
+    def report(row):
+        append_result(out_dir, row)
+        status = (f"${row['cost']:.4f} · {row['latency_s']}s" if row["status"] == "success"
+                  else f"ERROR {row['error']}")
+        extra = f" ({'; '.join(row['steps'])})" if row.get("steps") else ""
+        log(f"  {row['input']} · {row['recipe']} · s{row['seed']}: {status}{extra}")
+
+    plain = [j for j in todo if not j.get("base_hash")]
+    piped = [j for j in todo if j.get("base_hash")]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for row in pool.map(one, todo):
-            append_result(out_dir, row)
-            status = (f"${row['cost']:.4f} · {row['latency_s']}s" if row["status"] == "success"
-                      else f"ERROR {row['error']}")
-            log(f"  {row['input']} · {row['recipe']} · s{row['seed']}: {status}")
+        for row in pool.map(one, plain):
+            report(row)
+    if piped:
+        # plain results first, so pipelines can start from the very same base image
+        bases = {}
+        for d in [out_dir] + [d for d in history_dirs]:
+            for r in read_results(d):
+                if r.get("status") == "success" and not r.get("base_hash") and r.get("file") \
+                        and os.path.exists(os.path.join(d, r["file"])):
+                    bases.setdefault(r["hash"], (d, r["file"], r.get("url"), r.get("cost")))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for row in pool.map(lambda j: run_pipeline(j, b, out_dir, bases, lock_path), piped):
+                report(row)
     return read_results(out_dir)
 
 
