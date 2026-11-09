@@ -83,6 +83,20 @@ in MCP calls and in `bench.yaml`. Fallbacks, only if the user declines the CLI: 
 already host, or inline base64 through the MCP for a single small image (it fills the conversation
 and forces downscaling). Do not ask for a `.env` file while the CLI route is available.
 
+## Existing benches: mention, then ask
+
+If you find a `bench.yaml` (or earlier outputs or reports) in the working folder, do not assume it is
+what the user wants, and do not summarise its results or plan its next round. Say in one or two
+lines that it exists (path, its goal in a few words, whether it has results), then ask:
+
+- **Start a new bench** (default for a new request): leave the existing one untouched.
+- **Re-run or extend the existing bench**: new inputs, recipes or seeds on the same goal.
+- **Review the existing results** first.
+
+In the same message you may ask which input files to use (and whether they are the ones already in
+the bench). Then **wait for the answer before doing anything else**: no installs, no uploads, no
+further intake. Describe results only if they choose to review them.
+
 ## Step 1 — Intake: ask what to evaluate
 
 Ask in this order and wait for answers. If the user has already answered part of a question, ask
@@ -187,6 +201,7 @@ mis-specified: fix or demote it, and say so in the caveats.
 | "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
 | "I'll ask for the key so I can run `runware auth login --key`" | Never. The user signs in at the CLI prompt in their own terminal. |
+| "There's already a bench for this; I'll pick up where it left off" | Mention it and ask. A new request is a new bench unless the user says otherwise. |
 | "Local files: I'll base64 them into the MCP call" | Install the CLI and upload at full size. Inline is a last resort for one small image. |
 
 ## Quality bar
