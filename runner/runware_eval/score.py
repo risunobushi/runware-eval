@@ -141,6 +141,72 @@ def m_ssim_region(p, opt):
     return {"value": float(smap[mm].mean())}
 
 
+def _lum_crop(p, region, side_rgb):
+    m = p.region(region)
+    ys, xs = np.nonzero(m)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    return rgb2lab(side_rgb[y0:y1, x0:x1])[..., 0], m[y0:y1, x0:x1]
+
+
+def m_detail_similarity(p, opt):
+    """Illumination-invariant similarity of fine detail (lettering, stitching) inside a region:
+    normalised cross-correlation of the high-pass luminance layers. 1 = same detail, ~0 = unrelated."""
+    sigma = opt.get("sigma_px", 3)
+    a, m = _lum_crop(p, opt["region"], p.rgb_in)
+    b, _ = _lum_crop(p, opt["region"], p.rgb_out)
+    ha, hb = a - cv2.GaussianBlur(a, (0, 0), sigma), b - cv2.GaussianBlur(b, (0, 0), sigma)
+    ha, hb = ha[m] - ha[m].mean(), hb[m] - hb[m].mean()
+    return {"value": float((ha * hb).sum() / (np.sqrt((ha ** 2).sum() * (hb ** 2).sum()) + 1e-9))}
+
+
+def m_keypoint_match(p, opt):
+    """Share of the original's SIFT keypoints (inside the product) that find a geometrically consistent
+    match in the output, at a coarse scale. Caution: tested on relighting, it tracks how much the light
+    changed more than whether the product changed, so it is not a reliable identity gate there."""
+    spec = opt.get("region", "product")
+    sc = opt.get("side_px", 512) / max(p.W, p.H)   # coarse scale: generated images redraw micro-texture
+    g = lambda rgb: cv2.resize(cv2.cvtColor((rgb * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY), None,
+                               fx=sc, fy=sc, interpolation=cv2.INTER_AREA)
+    m = lambda r: cv2.resize((r * 255).astype(np.uint8), None, fx=sc, fy=sc, interpolation=cv2.INTER_NEAREST)
+    sift = cv2.SIFT_create(nfeatures=opt.get("max_points", 2000))
+    ka, da = sift.detectAndCompute(g(p.rgb_in), m(p.region(spec)))
+    kb, db = sift.detectAndCompute(g(p.rgb_out), m(p.region(spec, "out")))
+    if da is None or db is None or len(ka) < 8 or len(kb) < 8:
+        return {"value": 0.0, "points": len(ka or [])}
+    pairs = cv2.BFMatcher(cv2.NORM_L2).knnMatch(da, db, k=2)
+    good = [m for m, n in (x for x in pairs if len(x) == 2) if m.distance < 0.75 * n.distance]
+    if len(good) < 8:
+        return {"value": len(good) / len(ka), "points": len(ka), "inliers": len(good)}
+    src = np.float32([ka[m.queryIdx].pt for m in good])
+    dst = np.float32([kb[m.trainIdx].pt for m in good])
+    _, inl = cv2.findHomography(src, dst, cv2.RANSAC, opt.get("tolerance_px", 4.0))
+    n = int(inl.sum()) if inl is not None else 0
+    return {"value": n / len(ka), "points": len(ka), "inliers": n}
+
+
+def m_seam_jump(p, opt):
+    """Visible-compositing check for a locally edited region: brightness step across its border
+    (blurred L* just inside vs just outside, per sector), minus the same step in the original."""
+    m = p.region(opt["region"])
+    band, gap = opt.get("band_px", 8), opt.get("gap_px", 3)
+    ker = lambda r: np.ones((2 * r + 1, 2 * r + 1), np.uint8)
+    mu = m.astype(np.uint8)
+    inner = (cv2.erode(mu, ker(gap)) > 0) & ~(cv2.erode(mu, ker(gap + band)) > 0)
+    outer = (cv2.dilate(mu, ker(gap + band)) > 0) & ~(cv2.dilate(mu, ker(gap)) > 0)
+    ys, xs = np.nonzero(m)
+    cy, cx = ys.mean(), xs.mean()
+    yy, xx = np.mgrid[0:p.H, 0:p.W]
+    sector = ((np.arctan2(yy - cy, xx - cx) + np.pi) / (2 * np.pi) * 16).astype(int) % 16
+
+    def jump(lab):
+        L = cv2.GaussianBlur(lab[..., 0], (0, 0), 2)
+        d = [abs(L[inner & (sector == k)].mean() - L[outer & (sector == k)].mean())
+             for k in range(16) if (inner & (sector == k)).any() and (outer & (sector == k)).any()]
+        return float(np.mean(d)) if d else float("nan")
+    out_j, in_j = jump(p.lab_out), jump(p.lab_in)
+    return {"value": out_j - in_j, "output_step": out_j, "original_step": in_j}
+
+
 def m_sharpness_laplacian(p, opt):
     def sharp(rgb, m):
         g = cv2.cvtColor((rgb * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
@@ -186,8 +252,16 @@ def ts_contact_shadow(p, opt):
 METRICS = {
     "size_aspect": m_size_aspect, "phase_correlation": m_phase_correlation, "mask_iou": m_mask_iou,
     "deltaE2000_region": m_deltaE2000_region, "ssim_region": m_ssim_region,
-    "sharpness_laplacian": m_sharpness_laplacian,
+    "sharpness_laplacian": m_sharpness_laplacian, "detail_similarity": m_detail_similarity,
+    "keypoint_match": m_keypoint_match, "seam_jump": m_seam_jump,
 }
+COPY_SENSITIVE = ("detail_similarity", "ssim_region", "deltaE2000_region")
+
+
+def copied_regions(recipe):
+    """Regions a recipe copies from the original in a post step: pixel similarity there is by construction."""
+    return {list(s.values())[0] for s in (recipe or {}).get("post") or []
+            if any(k in s for k in ("restore", "transfer_detail"))}
 TASK_SPECIFIC = {
     "lr_lighting_shift": ts_lr_lighting_shift, "shading_contrast": ts_shading_contrast,
     "backdrop_lightness": ts_backdrop_lightness, "contact_shadow": ts_contact_shadow,
@@ -237,9 +311,10 @@ def label(opt):
 JUDGED = ("vlm_checklist", "vlm_same_object", "vlm_rubric")
 
 
-def score_pair(b, p, pending=None):
+def score_pair(b, p, pending=None, recipe=None):
     """Deterministic metrics now; vision-model metrics are queued in `pending` (run later, in parallel)."""
     rows = []
+    copied = copied_regions(recipe)
     for dim, spec in (b.get("evaluate") or {}).items():
         for opt in spec.get("metrics", []):
             row = {"dimension": dim, "mode": spec.get("mode", "gate"), "id": opt["id"], "label": label(opt),
@@ -256,6 +331,10 @@ def score_pair(b, p, pending=None):
             fn = TASK_SPECIFIC.get(opt.get("name")) if opt["id"] == "task_specific" else METRICS.get(opt["id"])
             if fn is None:
                 rows.append({**row, "status": "not_run", "note": "not implemented in this runner version"})
+                continue
+            if opt["id"] in COPY_SENSITIVE and opt.get("region") in copied:
+                rows.append({**row, "status": "not_run",
+                             "note": f"copied from the original by this recipe: a pass would be by construction"})
                 continue
             try:
                 vals = fn(p, opt)
@@ -275,9 +354,14 @@ def find_mask(out_dir, fname, recipe):
 
 
 def judge_calls(b):
-    """Vision-model calls one output needs (metrics x judges), for budgeting."""
-    n = sum(1 for spec in (b.get("evaluate") or {}).values() for o in spec.get("metrics", []) if o["id"] in JUDGED)
-    return n * len(b.get("judges") or judge_mod.DEFAULT_JUDGES)
+    """Vision-model calls one judged output needs: one combined call per image set, per judge."""
+    sets = {o.get("region") for spec in (b.get("evaluate") or {}).values() for o in spec.get("metrics", [])
+            if o["id"] in JUDGED}
+    return len(sets) * len(b.get("judges") or judge_mod.DEFAULT_JUDGES)
+
+
+def pixel_fails(metrics):
+    return sum(1 for m in metrics if m["mode"] == "gate" and m["id"] not in JUDGED and m.get("pass") is False)
 
 
 OUT_RE = re.compile(r"(.+?)__(.+?)__s(\d+)\.\w+$")
@@ -290,38 +374,59 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
     files = [f for f in sorted(glob.glob(os.path.join(out_dir, "*__*__s*.*")))
              if OUT_RE.match(os.path.basename(f)) and os.path.basename(f).split("__")[0] in inputs]
     panel = judge_mod.Panel(b.get("judges"), out_dir, log) if judges else None
-    if panel:
-        calls = judge_calls(b) * len(files)
-        projected = calls * judge_mod.EST_COST_PER_CALL
-        spent = sum((r.get("cost") or 0) + (r.get("eval_cost") or 0) for r in (results or []))
-        log(f"Vision judges: up to {calls} calls, about ${projected:.2f} (cached answers are free).")
-        if max_usd is not None and spent + projected > max_usd:
-            log(f"Skipping vision judges: ${spent + projected:.2f} would exceed the ${max_usd:.2f} cap.")
-            panel = None
+    max_failed = (b.get("judge_when") or {}).get("max_failed_checks", 1)
+    recipes_by_id = {r["id"]: r for r in b.get("recipes") or [] if isinstance(r, dict)}
     scored, pending = [], []
     for f in files:
         fname = os.path.basename(f)
         inp, recipe, seed = OUT_RE.match(fname).groups()
         p = Pair(b, inputs[inp], f, find_mask(out_dir, fname, recipe))
         jobs = [] if panel else None
-        metrics = score_pair(b, p, jobs)
+        metrics = score_pair(b, p, jobs, recipes_by_id.get(recipe))
+        fails = pixel_fails(metrics)
+        group = {}
         for row, pair, opt in jobs or []:
-            # keep only the small inline images, not the full-size arrays, while judging is queued
-            pending.append((row, judge_mod.prepare(pair, opt, b), opt))
+            if fails > max_failed:
+                row.update(status="not_run", note=f"skipped: failed {fails} pixel checks")
+                continue
+            # one combined call per output and image set; keep only small inline images while queued
+            g = group.setdefault(opt.get("region"), {"items": [], "refs": []})
+            g["items"].append((row, opt))
+            g["refs"] += [x for x in opt.get("refs") or [] if x not in g["refs"]]
+            g["pair"] = pair
+        for region, g in group.items():
+            prepared = judge_mod.prepare(g["pair"], {"region": region, "refs": g["refs"]}, b)
+            pending.append((g["items"], prepared))
         r = ops.get(fname, {})
         scored.append({"input": inp, "recipe": recipe, "seed": int(seed), "file": fname,
                        "native": f"{p.native[0]}x{p.native[1]}", "cost": r.get("cost"),
                        "latency_s": r.get("latency_s"), "metrics": metrics})
     if pending:
+        # budget check after the pixel funnel: only outputs that will actually be judged count
+        calls = len(pending) * len(panel.judges)
+        projected = calls * judge_mod.EST_COST_PER_CALL
+        spent = sum((r.get("spend", r.get("cost")) or 0) + (r.get("eval_cost") or 0)
+                    for r in (results or []) if not r.get("reused_from"))
+        log(f"Vision judges: {len(pending)} output(s) passed the pixel funnel (at most {max_failed} failed "
+            f"check(s)); up to {calls} calls, about ${projected:.2f} (cached answers are free).")
+        if max_usd is not None and spent + projected > max_usd:
+            log(f"Skipping vision judges: ${spent + projected:.2f} would exceed the ${max_usd:.2f} cap.")
+            for items, _ in pending:
+                for row, _ in items:
+                    row.update(status="not_run", note="skipped: budget cap")
+            pending = []
+    if pending:
         def one(item):
-            row, prepared, opt = item
+            items, prepared = item
             try:
-                vals = judge_mod.run_prepared(panel, prepared, opt)
-                ok = not (isinstance(vals.get("value"), float) and np.isnan(vals["value"]))
-                row.update(status="ok" if ok else "error", values=vals, note=vals.get("note"))
-                row["pass"] = check(vals, opt) if row["mode"] == "gate" and ok else None
+                results_ = judge_mod.run_combined(panel, prepared, [opt for _, opt in items])
+                for (row, opt), vals in zip(items, results_):
+                    ok = not (isinstance(vals.get("value"), float) and np.isnan(vals["value"]))
+                    row.update(status="ok" if ok else "error", values=vals, note=vals.get("note"))
+                    row["pass"] = check(vals, opt) if row["mode"] == "gate" and ok else None
             except Exception as e:  # one judge failure must not sink the whole report
-                row.update(status="error", note=str(e))
+                for row, _ in items:
+                    row.update(status="error", note=str(e))
         with ThreadPoolExecutor(max_workers=4) as pool:
             list(pool.map(one, pending))
         log(f"Vision judges done: ${panel.spent:.3f} spent on new answers.")

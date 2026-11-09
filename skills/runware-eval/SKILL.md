@@ -206,8 +206,10 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
    report, not loose images.
 
-Vision-model checks run in `score` with the panel in `judges` (about $0.06 per output for four
-checks × three judges; answers are cached; `--no-judges` skips them). Metrics marked `planned` in the
+Vision-model checks run in `score` as the second stage of a funnel: only outputs that fail at most
+`judge_when.max_failed_checks` pixel checks are judged, with one combined call per judge (about
+$0.006 per judged output; cached; `--no-judges` skips them). When picking metrics in Step 2, give the
+judges only questions no pixel check can answer. Metrics marked `planned` in the
 registry (OCR, human ranking) show as *not run* in the report. Say so; never present them as passed.
 
 **Before reporting, check the gates against the outputs.** A gate that every recipe fails, or one that

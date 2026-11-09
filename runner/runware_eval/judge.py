@@ -23,9 +23,9 @@ from PIL import Image
 
 from . import api
 
-DEFAULT_JUDGES = ["google-gemini-3-5-flash", "anthropic-claude-haiku-4-5", "openai-gpt-5-4-mini"]
+DEFAULT_JUDGES = ["google-gemini-3-1-flash-lite", "anthropic-claude-haiku-4-5", "openai-gpt-5-4-nano"]
 JSON_NATIVE = ("google-",)
-EST_COST_PER_CALL = 0.004
+EST_COST_PER_CALL = 0.002  # one combined call, measured: $0.0007-0.0038 depending on the judge
 
 SAME_OBJECT = ("Is the product in image 2 the same physical product as in image 1: same design, shape, "
                "colours, materials, hardware and details? Ignore lighting, shadows and background.")
@@ -145,6 +145,65 @@ def total_cost(out_dir):
     if not os.path.exists(path):
         return 0.0
     return sum(json.loads(l).get("cost") or 0 for l in open(path, encoding="utf8") if l.strip())
+
+
+def run_combined(panel, prepared, opts):
+    """All vlm_* metrics that share an image set, in ONE call per judge. Returns values per metric."""
+    images, intro = prepared
+    questions, spans, rubric = [], [], None
+    for o in opts:
+        qs = o.get("questions") or ([SAME_OBJECT] if o["id"] == "vlm_same_object" else [])
+        spans.append((len(questions), len(questions) + len(qs)))
+        questions += qs
+        if o["id"] == "vlm_rubric":
+            rubric = (o["rubric"], tuple(int(x) for x in str(o.get("scale", "1-5")).split("-")))
+    lines = [f"{intro}", "Answer about image 2."]
+    if questions:
+        lines.append("Answer each question strictly with yes or no.")
+        lines += [f"{i}. {q}" for i, q in enumerate(questions, 1)]
+    if rubric:
+        lines.append(f"Then score image 2 from {rubric[1][0]} (poor) to {rubric[1][1]} (excellent) on: {rubric[0]}")
+    shape = []
+    if questions:
+        shape.append('"answers":[{"q":1,"answer":"yes"},...]')
+    if rubric:
+        shape.append('"score":<integer>')
+    lines.append("Reply with JSON only: {" + ",".join(shape) + "}")
+    props, req = {}, []
+    if questions:
+        props["answers"] = {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                            "required": ["q", "answer"], "properties": {"q": {"type": "integer"},
+                            "answer": {"type": "string", "enum": ["yes", "no"]}}}}
+        req.append("answers")
+    if rubric:
+        props["score"] = {"type": "integer", "minimum": rubric[1][0], "maximum": rubric[1][1]}
+        req.append("score")
+    schema = {"type": "object", "additionalProperties": False, "required": req, "properties": props}
+    rows = [r for r in panel.ask_all("\n".join(lines), images, schema) if r["status"] == "success"]
+    grid, scores = {}, {}
+    for r in rows:
+        a = r["answer"] if isinstance(r["answer"], dict) else {}
+        ans = {x.get("q"): str(x.get("answer", "")).lower() == "yes" for x in a.get("answers", [])}
+        if questions and all(i in ans for i in range(1, len(questions) + 1)):
+            grid[r["judge"]] = [ans[i] for i in range(1, len(questions) + 1)]
+        if rubric and isinstance(a.get("score"), (int, float)):
+            scores[r["judge"]] = float(a["score"])
+    out = []
+    for o, (s0, s1) in zip(opts, spans):
+        if o["id"] == "vlm_rubric":
+            out.append({"value": float(np.mean(list(scores.values()))), "judges": scores,
+                        "spread": float(max(scores.values()) - min(scores.values()))} if scores
+                       else {"value": float("nan"), "note": "no judge answered"})
+            continue
+        sub = {j: v[s0:s1] for j, v in grid.items()}
+        if not sub:
+            out.append({"value": float("nan"), "note": "no judge answered"})
+            continue
+        g = np.array(list(sub.values()))
+        out.append({"value": float(g.mean()), "judges": {j: float(np.mean(v)) for j, v in sub.items()},
+                    "agreement": float(np.mean([g[:, i].all() or (~g[:, i]).all() for i in range(g.shape[1])])),
+                    "per_question": {questions[s0 + i]: float(g[:, i].mean()) for i in range(g.shape[1])}})
+    return out
 
 
 def crop(rgb, region):
