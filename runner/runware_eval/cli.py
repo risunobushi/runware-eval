@@ -55,7 +55,9 @@ def cmd_run(a):
     run.ensure_input_masks(b, out)
     run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
     jobs = bench.jobs(b, a.round, a.inputs, a.recipes)
-    results = run.execute(jobs, out, cap)
+    runs_root = os.path.join(b["_dir"], "runs")
+    hist = [os.path.join(runs_root, d) for d in os.listdir(runs_root)] if os.path.isdir(runs_root) else []
+    results = run.execute(jobs, out, cap, history_dirs=hist + (a.history or []))
     print(f"Done. Results in {out}")
     if not a.no_score:
         cmd_score(a, b, out, results)
@@ -83,6 +85,29 @@ def cmd_report(a, b=None, out=None):
     print("Report →", report.build(b, out, notes, listed))
 
 
+def cmd_recipes(a):
+    from . import recipes as rec
+    if a.action == "extract":
+        b = bench.load(a.bench, resolve_recipes=False)
+        written = rec.extract(b, a.bench)
+        print("\n".join(f"wrote {w}" for w in written) or "No inline recipes to extract.")
+        if written:
+            print(f"bench.yaml now lists them by id (backup: {a.bench}.pre-extract.bak)")
+        return
+    b = bench.load(a.bench)
+    runs_root = os.path.join(b["_dir"], "runs")
+    seen = {}
+    if os.path.isdir(runs_root):
+        for d in os.listdir(runs_root):
+            for r in run.read_results(os.path.join(runs_root, d)):
+                if r.get("status") == "success" and r.get("fp"):
+                    seen[r["fp"]] = seen.get(r["fp"], 0) + 1
+    print(f"{'id':36} {'fingerprint':17} {'runs':>4}  model")
+    for r in b["recipes"]:
+        flag = "  (edited: new fingerprint)" if r.get("_edited_from") else ""
+        print(f"{r['id']:36} {r['_fp']:17} {seen.get(r['_fp'], 0):>4}  {r['model']}{flag}")
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
@@ -94,14 +119,19 @@ def main():
         p.add_argument("--notes", help="JSON with `findings` and `caveats` to show in the report")
         if name == "run":
             p.add_argument("--no-score", action="store_true")
+            p.add_argument("--history", nargs="*", help="extra run folders to reuse matching results from")
         if name in ("run", "score"):
             p.add_argument("--no-judges", action="store_true", help="skip the vision-model checks")
         p.set_defaults(fn=fn)
+    rp = sub.add_parser("recipes", help="list recipe files, or extract inline recipes into files")
+    rp.add_argument("action", choices=["list", "extract"])
+    rp.add_argument("bench")
+    rp.set_defaults(fn=cmd_recipes)
     a = ap.parse_args()
     try:
         a.fn(a)
-    except api.RunwareError as err:
-        sys.exit(str(err))
+    except (api.RunwareError, ValueError, FileExistsError, KeyError) as err:
+        sys.exit(f"runware-eval: {err}")
 
 
 if __name__ == "__main__":

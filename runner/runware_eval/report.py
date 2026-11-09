@@ -336,7 +336,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         lat = f"{a['latency']:.0f}s" if a["latency"] else "—"
         out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' style='all:unset;cursor:pointer;"
                    f"font-weight:600'>{e(rid)}</button><div class='muted mono' style='font-size:11px'>"
-                   f"{e(recipes.get(rid, {}).get('model', ''))}</div></td>{''.join(cells)}"
+                   f"{e(recipes.get(rid, {}).get('model', ''))} · {e(recipes.get(rid, {}).get('_fp', '') or '')[:8]}</div></td>{''.join(cells)}"
                    f"<td class='mono'>{cost}</td><td class='mono'>{lat}</td></tr>")
     out.append("</tbody></table></div><p class='muted' style='font-size:12px'>* listed price (no measured cost for this recipe yet).</p></section>")
 

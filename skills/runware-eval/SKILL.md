@@ -168,8 +168,13 @@ Map each recipe's parameters from its own schema. Record every convention you ha
   strength or weight scale differ per model. Do not assume one model's scale carries over.
 - **Size and aspect**: allowed dimensions differ; note any model that snaps or pads.
 
-Write `bench.yaml` following `references/bench-format.md`. The file is the deliverable: it must be
-re-runnable later without an agent, and adding a new model must mean adding one recipe.
+Write each recipe as its own file in `recipes/<id>.yaml` (self-contained: prompts written out, notes
+on every translated convention), and list them by id in `bench.yaml`, following
+`references/bench-format.md`. Before creating a recipe, run
+`uv run --project <runner> runware-eval recipes list bench.yaml`: if a recipe for the same model and
+settings already exists in the bench's recipe folders (or a team folder in `recipe_dirs`), reuse it
+instead of writing a near-duplicate. The bench is the deliverable: it must re-run later without an
+agent, and adding a model must mean adding one recipe file.
 
 ## Step 5 — Cost, smoke round, full run, report
 
@@ -221,6 +226,7 @@ mis-specified: fix or demote it, and say so in the caveats.
 | "I'll dry-run it to get a free price" | Dry-run is unreliable on Runware. Estimate from measured smoke costs, and say which numbers are listed. |
 | "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
 | "Inputs are URLs / already uploaded, so I can skip one of the three" | Step 0 needs all three every time: the runner uses the CLI login and runs through uv. |
+| "I'll put the recipes inline in bench.yaml" | One file per recipe in `recipes/`, so they can be shared and matched by fingerprint. |
 | "I'll `pip install` the runner" | Never into the user's Python. Run it through uv. |
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |
 | "I'll ask for the key so I can run `runware auth login --key`" | Never. The user signs in at the CLI prompt in their own terminal. |

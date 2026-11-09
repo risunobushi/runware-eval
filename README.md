@@ -49,6 +49,14 @@ uv run --project runner runware-eval run      bench.yaml --round full    # stops
 uv run --project runner runware-eval report   bench.yaml --round full --notes notes.json
 ```
 
+Recipes are one file each in `recipes/`, fingerprinted. Copy a file into another bench to share it;
+matching past results (same fingerprint, same images, same seed) are reused instead of paid for:
+
+```
+uv run --project runner runware-eval recipes list    bench.yaml   # id, fingerprint, past runs
+uv run --project runner runware-eval recipes extract bench.yaml   # move inline recipes into files
+```
+
 Without cloning: `uvx --from "git+https://github.com/risunobushi/runware-eval#subdirectory=runner" runware-eval …`
 
 The runner is pinned to Python 3.12 (`runner/.python-version`) and to exact dependency versions

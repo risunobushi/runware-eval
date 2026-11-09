@@ -1,6 +1,7 @@
 """Execute bench jobs: cached, budget-guarded, concurrent. Writes images, masks and results.jsonl."""
 import json
 import os
+import shutil
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -57,13 +58,46 @@ def mask_from(url, path):
     return res.get("cost") or 0.0
 
 
-def execute(jobs, out_dir, max_usd, workers=6, log=print):
+def history(dirs):
+    """Successful results by content key across run folders, with the folder they live in."""
+    found = {}
+    for d in dirs:
+        for r in read_results(d):
+            if r.get("status") == "success" and r.get("file") and os.path.exists(os.path.join(d, r["file"])):
+                found.setdefault(r["hash"], (d, r))
+    return found
+
+
+def reuse(j, src_dir, src, out_dir):
+    """Copy a matching past output (and its mask) into this run under this run's names."""
+    ext = os.path.splitext(src["file"])[1]
+    name = f"{j['input']}__{j['recipe']}__s{j['seed']}{ext}"
+    shutil.copyfile(os.path.join(src_dir, src["file"]), os.path.join(out_dir, name))
+    m_src = os.path.join(src_dir, "masks", src["file"].rsplit(".", 1)[0] + "_cut.png")
+    if os.path.exists(m_src):
+        shutil.copyfile(m_src, os.path.join(out_dir, "masks", name.rsplit(".", 1)[0] + "_cut.png"))
+    row = {**src, **{k: j[k] for k in ("input", "recipe", "seed", "model", "fp", "hash")},
+           "file": name, "reused_from": os.path.abspath(src_dir), "eval_cost": 0.0}
+    return row
+
+
+def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=()):
     os.makedirs(os.path.join(out_dir, "masks"), exist_ok=True)
     results = read_results(out_dir)
     done = {r["hash"] for r in results if r.get("status") == "success"
             and os.path.exists(os.path.join(out_dir, r["file"]))}
+    past = history([d for d in history_dirs if os.path.abspath(d) != os.path.abspath(out_dir)])
+    reused = 0
+    for j in jobs:
+        if j["hash"] not in done and j["hash"] in past:
+            append_result(out_dir, reuse(j, *past[j["hash"]], out_dir))
+            done.add(j["hash"])
+            reused += 1
+    if reused:
+        log(f"Reused {reused} matching result(s) from earlier runs (same recipe fingerprint, inputs and seed).")
+        results = read_results(out_dir)
     todo = [j for j in jobs if j["hash"] not in done]
-    spent = sum(r.get("cost") or 0 for r in results) + sum(r.get("eval_cost") or 0 for r in results)
+    spent = sum((r.get("cost") or 0) + (r.get("eval_cost") or 0) for r in results if not r.get("reused_from"))
     est = estimate(todo, results)
     unknown = [e["recipe"] for e in est if e["est_cost"] is None]
     projected = sum(e["est_cost"] or 0 for e in est)
@@ -77,7 +111,7 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print):
 
     def one(j):
         res = api.run_task(j["task"])
-        row = {k: j[k] for k in ("input", "recipe", "seed", "model", "hash")}
+        row = {k: j[k] for k in ("input", "recipe", "seed", "model", "fp", "hash")}
         row.update(taskUUID=j["task"]["taskUUID"], status=res["status"], cost=res.get("cost"),
                    latency_s=res.get("latency_s"), error=res.get("error"))
         if res["status"] == "success":
@@ -133,3 +167,4 @@ def ensure_recipe_masks(b, out_dir, lock_path):
             Image.fromarray((white * 255).astype(np.uint8)).save(path)
             rec = benchmod.upload(path, os.path.abspath(path), lock_path)
             inp.setdefault("_masks", {})[r["id"]] = rec["url"]
+            b["_url_sha"][rec["url"]] = rec["sha1"]

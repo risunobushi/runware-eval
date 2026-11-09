@@ -30,9 +30,13 @@ def _fix_bool_keys(o):
     return o
 
 
-def load(path):
+def load(path, resolve_recipes=True):
     b = _fix_bool_keys(yaml.safe_load(open(path, encoding="utf8")))
     b["_dir"] = os.path.dirname(os.path.abspath(path))
+    b["_url_sha"] = {}
+    if resolve_recipes:
+        from .recipes import resolve_bench
+        resolve_bench(b)
     return b
 
 
@@ -75,6 +79,7 @@ def ensure_media(b, lock_path):
     for entry in media_entries(b).values():
         rec = upload(os.path.join(b["_dir"], entry["path"]), entry["path"], lock_path)
         entry["_url"], entry["_size"] = rec["url"], (rec["width"], rec["height"])
+        b["_url_sha"][rec["url"]] = rec["sha1"]
 
 
 def fit(w, h, multiple=1, max_side=None, max_mp=None):
@@ -125,6 +130,20 @@ def resolve(value, ctx):
     raise ValueError(f"Unknown placeholder {value}")
 
 
+def content_key(b, task):
+    """Identity of a task by content: the request with every uploaded file replaced by its hash.
+
+    Independent of URLs, paths, recipe names and machines, so matching history can be reused.
+    """
+    def swap(v):
+        if isinstance(v, dict):
+            return {k: swap(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [swap(x) for x in v]
+        return f"sha1:{b['_url_sha'][v]}" if isinstance(v, str) and v in b["_url_sha"] else v
+    return hashlib.sha1(json.dumps(swap(task), sort_keys=True).encode()).hexdigest()[:20]
+
+
 def jobs(b, round_name, only_inputs=None, only_recipes=None):
     """One job per (input, recipe, seed). Smoke round: first input (unless chosen), first seed."""
     inputs = [i for i in b["inputs"] if not only_inputs or stem(i["path"]) in only_inputs]
@@ -142,8 +161,7 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
                 params = resolve(r.get("params", {}), ctx)
                 task = {"taskType": r.get("taskType", "imageInference"), "model": r["model"], **params,
                         "includeCost": True}
-                key = hashlib.sha1(json.dumps(task, sort_keys=True).encode()).hexdigest()[:16]
                 out.append({"input": stem(inp["path"]), "recipe": r["id"], "seed": seed,
-                            "model": r["model"], "hash": key,
+                            "model": r["model"], "fp": r.get("_fp"), "hash": content_key(b, task),
                             "task": {**task, "taskUUID": str(uuid.uuid4())}})
     return out

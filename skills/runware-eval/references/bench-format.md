@@ -15,7 +15,39 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `calibration` | For judge or aesthetic metrics: how many outputs the user labels. |
 | `budget` | `max_usd` for one full run. The runner refuses to start above it. |
 | `seeds` | Seeds per recipe, to measure consistency. |
-| `recipes` | Each: `id`, `model` (AIR), `params` (exact schema field names), `mask` (region and polarity), `notes` (every convention translated). |
+| `recipes` | Ids of recipe files to run (or `all`). Each file: `id`, `model` (AIR), `params` (exact schema field names), optional `size` and `mask`, `notes` (every convention translated). |
+
+## Recipes: one file each
+
+Recipes live in `recipes/<id>.yaml` next to `bench.yaml`; `bench.yaml` lists the ones to run by id,
+or `recipes: all`. Add shared folders with `recipe_dirs: [recipes, ../team-recipes]` (earlier
+folders win on duplicate ids). Inline recipe dicts still work; `runware-eval recipes extract` moves
+them into files.
+
+```yaml
+# recipes/ideogram-precise-low.yaml
+id: ideogram-precise-low
+model: ideogram:4.5@precise-edit
+params:
+  inputs: { seedImage: $input, referenceImages: [$lighting_ref] }
+  positivePrompt: >-
+    Relight this product photo using the lighting of the reference image ...
+  settings: { quality: low }
+  seed: $seed
+notes: >-
+  Every convention translated for this model, and the price ($0.03/output).
+fingerprint: 8a2fdbe2577bf114   # written by runware-eval; changes when the request changes
+```
+
+- **Self-contained:** prompts are written out in the file. A recipe only expects named slots from
+  its bench (`$input`, `$seed`, `$mask`, or media such as `$lighting_ref`); the runner says which
+  are missing.
+- **Fingerprint:** a hash of `taskType`, `model`, `params`, `size` and `mask`. Renaming a recipe or
+  editing its notes keeps it; changing the request changes it, and the runner rewrites the line.
+- **History:** every result is keyed by fingerprint + content hash of each image sent + seed. A
+  match in any folder under `runs/` (or `--history <folder>`) is copied in instead of paid for again.
+- **Sharing:** copy a recipe file into another bench's `recipes/` folder, or point `recipe_dirs` at
+  a team folder in git.
 
 ## Placeholders in recipe `params`
 
