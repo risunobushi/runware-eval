@@ -263,7 +263,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                f"<span>seed(s) {', '.join(map(str, seeds))}</span><span>{len(scored)} outputs scored</span>"
                f"<span>Generation spend ${measured:.3f}</span>"
                f"<span>Checks spend ${data.get('judge_cost', 0) + sum(r.get('eval_cost') or 0 for r in data.get('attempted_rows', [])):.3f}</span>"
-               f"<span>Judges: {e(', '.join(data.get('judges') or [])) or 'off'}</span></div></header>")
+               f"<span>Judges: {e(', '.join(data.get('judges') or [])) or 'off'}</span>"
+               f"<span>Controls: {sum(c['ok'] for c in data.get('controls', []))}/{len(data.get('controls', []))} ok</span>"
+               "</div></header>")
     best = order[0]
     cheapest_pass = min(passing, key=lambda r: agg[r]["cost"] or 9) if passing else None
     out.append("<section aria-label='Summary'><div class='cards'>"
@@ -279,10 +281,16 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                f"<span class='lab'>{e(', '.join(sorted({x['recipe'] for x in errors}))) or 'None'}</span></div>"
                "</div></section>")
 
-    if notes.get("findings") or notes.get("caveats") or missing or errors:
+    bad_ctl = [c for c in data.get("controls", []) if not c["ok"]]
+    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl:
         out.append("<section><h2>What this run says</h2><ul class='notes'>")
         out += [f"<li>{n}</li>" for n in notes.get("findings", [])]
         out += [f"<li class='warn'>{n}</li>" for n in notes.get("caveats", [])]
+        for c in bad_ctl:
+            out.append(f"<li class='warn'><strong>Control failed:</strong> {e(c['label'])} on an unchanged copy of "
+                       f"{e(c['input'])} scored {fmtv(c['value'])} and {'failed' if c['expected_pass'] else 'passed'}; "
+                       f"it should have {'passed' if c['expected_pass'] else 'failed'}. The check or its threshold "
+                       f"is wrong for this bench; read its results with care.</li>")
         for x in errors:
             out.append(f"<li class='warn'><strong>{e(x['recipe'])}</strong> on {e(x['input'])} failed: "
                        f"{e(str(x.get('error')))}</li>")

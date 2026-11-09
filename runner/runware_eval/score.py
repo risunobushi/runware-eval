@@ -17,7 +17,9 @@ from skimage.metrics import structural_similarity
 
 from concurrent.futures import ThreadPoolExecutor
 
+from . import catalog
 from . import judge as judge_mod
+from .metric_api import erode  # noqa: F401  (re-exported for report.py and judge.py)
 from . import render as render_mod
 from .bench import stem
 
@@ -40,9 +42,6 @@ def load_mask(path, size):
     return np.asarray(a) > 127
 
 
-def erode(mask, pct=0.15):
-    k = max(1, int(round(max(mask.shape) * pct / 100)))
-    return cv2.erode(mask.astype(np.uint8), np.ones((2 * k + 1, 2 * k + 1), np.uint8)) > 0
 
 
 def input_region(b, inp, spec):
@@ -96,207 +95,14 @@ class Pair:
 
 
 # ---------- metrics ----------
-
-def m_size_aspect(p, opt):
-    ow, oh = p.native
-    return {"value": abs((ow / oh) / (p.W / p.H) - 1), "native": f"{ow}x{oh}"}
-
-
-def m_phase_correlation(p, opt):
-    a, b = p.region("product").astype(np.float32), p.region("product", "out").astype(np.float32)
-    (dx, dy), _ = cv2.phaseCorrelate(a, b)
-    return {"value": float(np.hypot(dx, dy))}
-
-
-def m_mask_iou(p, opt):
-    a, b = p.region(opt.get("region", "product")), p.region(opt.get("region", "product"), "out")
-    return {"value": float((a & b).sum() / max(1, (a | b).sum()))}
-
-
-def m_deltaE2000_region(p, opt):
-    spec = opt.get("region")
-    sel = erode(p.region(spec) & p.region(spec, "out"), opt.get("erode_pct", 0.15))
-    lo, hi = opt.get("l_range", (0, 100))
-    if "l_range" in opt:
-        sel &= (p.lab_in[..., 0] > lo) & (p.lab_in[..., 0] < hi) & (p.lab_out[..., 0] > lo) & (p.lab_out[..., 0] < hi)
-    a, b = p.lab_in[sel], p.lab_out[sel].copy()
-    if opt.get("ignore_lightness"):
-        b[:, 0] = a[:, 0]
-    de = deltaE_ciede2000(a, b)
-    return {"value": float(de.mean()), "mean": float(de.mean()), "p95": float(np.percentile(de, 95))}
-
-
-def m_ssim_region(p, opt):
-    spec = opt.get("region")
-    m = p.region(spec)
-    ys, xs = np.nonzero(m)
-    x0, y0, x1, y1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
-    a, b = p.lab_in[y0:y1, x0:x1, 0].copy(), p.lab_out[y0:y1, x0:x1, 0].copy()
-    mm = m[y0:y1, x0:x1]
-    if opt.get("on") == "luminance_normalised":
-        for arr in (a, b):
-            arr -= arr[mm].mean()
-            arr /= arr[mm].std() + 1e-6
-    rng = max(a.max(), b.max()) - min(a.min(), b.min())
-    _, smap = structural_similarity(a, b, data_range=rng, full=True)
-    return {"value": float(smap[mm].mean())}
-
-
-def _lum_crop(p, region, side_rgb):
-    m = p.region(region)
-    ys, xs = np.nonzero(m)
-    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-    return rgb2lab(side_rgb[y0:y1, x0:x1])[..., 0], m[y0:y1, x0:x1]
-
-
-def m_detail_similarity(p, opt):
-    """Illumination-invariant similarity of fine detail (lettering, stitching) inside a region: the
-    best normalised cross-correlation of the high-pass luminance layers over small offsets (up to
-    `search_px`, default 24), so outputs that are not pixel-aligned (re-framed images, 3D renders)
-    are compared fairly. 1 = same detail, ~0 = unrelated."""
-    sigma, pad = opt.get("sigma_px", 3), int(opt.get("search_px", 24))
-    m = p.region(opt["region"])
-    ys, xs = np.nonzero(m)
-    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-    hp = lambda L: (L - cv2.GaussianBlur(L, (0, 0), sigma)).astype(np.float32)
-    a = hp(p.lab_in[..., 0])[y0:y1, x0:x1]
-    Y0, Y1, X0, X1 = max(0, y0 - pad), min(p.H, y1 + pad), max(0, x0 - pad), min(p.W, x1 + pad)
-    b = hp(p.lab_out[..., 0])[Y0:Y1, X0:X1]
-    if b.shape[0] < a.shape[0] or b.shape[1] < a.shape[1] or a.std() < 1e-6:
-        return {"value": float("nan")}
-    res = cv2.matchTemplate(b, a, cv2.TM_CCOEFF_NORMED)
-    _, best, _, loc = cv2.minMaxLoc(res)
-    return {"value": float(best), "offset_px": [int(loc[0] - (x0 - X0)), int(loc[1] - (y0 - Y0))]}
-
-
-def m_keypoint_match(p, opt):
-    """Share of the original's SIFT keypoints (inside the product) that find a geometrically consistent
-    match in the output, at a coarse scale. Caution: tested on relighting, it tracks how much the light
-    changed more than whether the product changed, so it is not a reliable identity gate there."""
-    spec = opt.get("region", "product")
-    sc = opt.get("side_px", 512) / max(p.W, p.H)   # coarse scale: generated images redraw micro-texture
-    g = lambda rgb: cv2.resize(cv2.cvtColor((rgb * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY), None,
-                               fx=sc, fy=sc, interpolation=cv2.INTER_AREA)
-    m = lambda r: cv2.resize((r * 255).astype(np.uint8), None, fx=sc, fy=sc, interpolation=cv2.INTER_NEAREST)
-    sift = cv2.SIFT_create(nfeatures=opt.get("max_points", 2000))
-    ka, da = sift.detectAndCompute(g(p.rgb_in), m(p.region(spec)))
-    kb, db = sift.detectAndCompute(g(p.rgb_out), m(p.region(spec, "out")))
-    if da is None or db is None or len(ka) < 8 or len(kb) < 8:
-        return {"value": 0.0, "points": len(ka or [])}
-    pairs = cv2.BFMatcher(cv2.NORM_L2).knnMatch(da, db, k=2)
-    good = [m for m, n in (x for x in pairs if len(x) == 2) if m.distance < 0.75 * n.distance]
-    if len(good) < 8:
-        return {"value": len(good) / len(ka), "points": len(ka), "inliers": len(good)}
-    src = np.float32([ka[m.queryIdx].pt for m in good])
-    dst = np.float32([kb[m.trainIdx].pt for m in good])
-    _, inl = cv2.findHomography(src, dst, cv2.RANSAC, opt.get("tolerance_px", 4.0))
-    n = int(inl.sum()) if inl is not None else 0
-    return {"value": n / len(ka), "points": len(ka), "inliers": n}
-
-
-def m_seam_jump(p, opt):
-    """Visible-compositing check for a locally edited region: brightness step across its border
-    (blurred L* just inside vs just outside, per sector), minus the same step in the original."""
-    m = p.region(opt["region"])
-    band, gap = opt.get("band_px", 8), opt.get("gap_px", 3)
-    ker = lambda r: np.ones((2 * r + 1, 2 * r + 1), np.uint8)
-    mu = m.astype(np.uint8)
-    inner = (cv2.erode(mu, ker(gap)) > 0) & ~(cv2.erode(mu, ker(gap + band)) > 0)
-    outer = (cv2.dilate(mu, ker(gap + band)) > 0) & ~(cv2.dilate(mu, ker(gap)) > 0)
-    ys, xs = np.nonzero(m)
-    cy, cx = ys.mean(), xs.mean()
-    yy, xx = np.mgrid[0:p.H, 0:p.W]
-    sector = ((np.arctan2(yy - cy, xx - cx) + np.pi) / (2 * np.pi) * 16).astype(int) % 16
-
-    def jump(lab):
-        L = cv2.GaussianBlur(lab[..., 0], (0, 0), 2)
-        d = [abs(L[inner & (sector == k)].mean() - L[outer & (sector == k)].mean())
-             for k in range(16) if (inner & (sector == k)).any() and (outer & (sector == k)).any()]
-        return float(np.mean(d)) if d else float("nan")
-    out_j, in_j = jump(p.lab_out), jump(p.lab_in)
-    return {"value": out_j - in_j, "output_step": out_j, "original_step": in_j}
-
-
-def m_bbox_aspect(p, opt):
-    """Proportions: relative difference between the width/height ratios of the product's bounding box."""
-    def ratio(m):
-        ys, xs = np.nonzero(m)
-        return (xs.max() - xs.min() + 1) / (ys.max() - ys.min() + 1)
-    spec = opt.get("region", "product")
-    return {"value": float(abs(ratio(p.region(spec, "out")) / ratio(p.region(spec)) - 1))}
-
-
-def _mesh(p, key):
-    if not getattr(p, "mesh", None):
-        raise KeyError("not a 3D output")
-    v = p.mesh[key]
-    return {"value": float(v) if not isinstance(v, bool) else (1.0 if v else 0.0)}
-
-
-def m_sharpness_laplacian(p, opt):
-    def sharp(rgb, m):
-        g = cv2.cvtColor((rgb * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        return cv2.Laplacian(g, cv2.CV_64F)[erode(m)].var()
-    spec = opt.get("region")
-    return {"value": float(sharp(p.rgb_out, p.region(spec, "out")) / sharp(p.rgb_in, p.region(spec)))}
-
-
-def ts_lr_lighting_shift(p, opt):
-    cx = np.nonzero(p.region("product"))[1].mean()
-    left = np.arange(p.W)[None, :] < cx
-
-    def lr(L, m):
-        return L[m & left].mean() - L[m & ~left].mean()
-    return {"value": float(lr(p.lab_out[..., 0], p.region("product", "out")) - lr(p.lab_in[..., 0], p.region("product")))}
-
-
-def ts_shading_contrast(p, opt):
-    return {"value": float(p.lab_out[..., 0][p.region("product", "out")].std()
-                           / p.lab_in[..., 0][p.region("product")].std())}
-
-
-def ts_backdrop_lightness(p, opt):
-    bg = erode(~p.region("product")) & erode(~p.region("product", "out"))
-    return {"value": float(p.lab_out[..., 0][bg].mean() - p.lab_in[..., 0][bg].mean())}
-
-
-def ts_contact_shadow(p, opt):
-    """Lightness drop in a band just below the product, against the nearby backdrop."""
-    m = p.region("product")
-    ys, xs = np.nonzero(m)
-    y1, x0, x1 = ys.max(), xs.min(), xs.max()
-    band = max(4, int(0.04 * p.H))
-    below = np.zeros_like(m)
-    below[y1:min(p.H, y1 + band), x0:x1] = True
-    below &= ~m
-    ref = np.zeros_like(m)
-    ref[min(p.H - 1, y1 + 3 * band):min(p.H, y1 + 4 * band), x0:x1] = True
-    L = p.lab_out[..., 0]
-    return {"value": float(L[ref].mean() - L[below].mean()) if ref.any() and below.any() else float("nan")}
-
-
-METRICS = {
-    "size_aspect": m_size_aspect, "phase_correlation": m_phase_correlation, "mask_iou": m_mask_iou,
-    "deltaE2000_region": m_deltaE2000_region, "ssim_region": m_ssim_region,
-    "sharpness_laplacian": m_sharpness_laplacian, "detail_similarity": m_detail_similarity,
-    "keypoint_match": m_keypoint_match, "seam_jump": m_seam_jump, "bbox_aspect": m_bbox_aspect,
-    "mesh_faces": lambda p, o: _mesh(p, "faces"), "mesh_watertight": lambda p, o: _mesh(p, "watertight"),
-    "mesh_parts": lambda p, o: _mesh(p, "parts"), "mesh_texture_px": lambda p, o: _mesh(p, "texture_px"),
-    "mesh_file_mb": lambda p, o: _mesh(p, "file_mb"),
-}
-COPY_SENSITIVE = ("detail_similarity", "ssim_region", "deltaE2000_region")
+# Implementations live in one file each: the curated library (runware_eval/metrics_lib/) plus a
+# bench's own metrics/ folder and any shared metric_dirs. See catalog.py and metric_api.py.
 
 
 def copied_regions(recipe):
     """Regions a recipe copies from the original in a post step: pixel similarity there is by construction."""
     return {list(s.values())[0] for s in (recipe or {}).get("post") or []
             if any(k in s for k in ("restore", "transfer_detail"))}
-TASK_SPECIFIC = {
-    "lr_lighting_shift": ts_lr_lighting_shift, "shading_contrast": ts_shading_contrast,
-    "backdrop_lightness": ts_backdrop_lightness, "contact_shadow": ts_contact_shadow,
-}
-
-
 # ---------- gates ----------
 
 def check(vals, opt):
@@ -340,10 +146,16 @@ def label(opt):
 JUDGED = ("vlm_checklist", "vlm_same_object", "vlm_rubric")
 
 
-def score_pair(b, p, pending=None, recipe=None):
+def metric_id(opt):
+    """`task_specific` + `name` is the older spelling of a metric id; both work."""
+    return opt.get("name") if opt["id"] == "task_specific" else opt["id"]
+
+
+def score_pair(b, p, pending=None, recipe=None, reg=None):
     """Deterministic metrics now; vision-model metrics are queued in `pending` (run later, in parallel)."""
     rows = []
     copied = copied_regions(recipe)
+    reg = reg if reg is not None else catalog.load(b)
     for dim, spec in (b.get("evaluate") or {}).items():
         for opt in spec.get("metrics", []):
             row = {"dimension": dim, "mode": spec.get("mode", "gate"), "id": opt["id"], "label": label(opt),
@@ -357,11 +169,14 @@ def score_pair(b, p, pending=None, recipe=None):
                     rows.append(row)
                     pending.append((row, p, opt))
                 continue
-            fn = TASK_SPECIFIC.get(opt.get("name")) if opt["id"] == "task_specific" else METRICS.get(opt["id"])
-            if fn is None:
-                rows.append({**row, "status": "not_run", "note": "not implemented in this runner version"})
+            m = reg.get(metric_id(opt))
+            if m is None:
+                rows.append({**row, "status": "not_run",
+                             "note": f"no metric file '{metric_id(opt)}' in the library or the bench's metrics/"})
                 continue
-            if opt["id"] in COPY_SENSITIVE and opt.get("region") in copied:
+            fn = m["compute"]
+            row.update(metric_fp=m["fp"], metric_source=m["source"])
+            if m["meta"].get("copy_sensitive") and opt.get("region") in copied:
                 rows.append({**row, "status": "not_run",
                              "note": f"copied from the original by this recipe: a pass would be by construction"})
                 continue
@@ -372,6 +187,36 @@ def score_pair(b, p, pending=None, recipe=None):
             except (KeyError, ValueError, IndexError) as e:
                 rows.append({**row, "status": "error", "note": str(e)})
     return rows
+
+
+def controls(b, reg):
+    """Score each input against an unchanged copy of itself. A `preserve` gate must pass, a `change`
+    gate must fail. A control that goes the wrong way means the check or its threshold is broken."""
+    out = []
+    for inp in b["inputs"]:
+        src = os.path.join(b["_dir"], inp["path"])
+        prod = (inp.get("regions") or {}).get("product")
+        mask = os.path.join(b["_dir"], prod) if isinstance(prod, str) and not prod.startswith("auto:") else None
+        p = Pair(b, inp, src, mask)
+        for dim, spec in (b.get("evaluate") or {}).items():
+            if spec.get("mode", "gate") != "gate":
+                continue
+            for opt in spec.get("metrics", []):
+                m = reg.get(metric_id(opt))
+                if m is None or opt["id"] in JUDGED or m["meta"].get("kind") not in ("preserve", "change"):
+                    continue
+                try:
+                    vals = m["compute"](p, opt)
+                except (KeyError, ValueError, IndexError):
+                    continue
+                passed = check(vals, opt)
+                if passed is None:
+                    continue
+                expected = m["meta"]["kind"] == "preserve"
+                out.append({"input": stem(inp["path"]), "dimension": dim, "label": label(opt),
+                            "kind": m["meta"]["kind"], "value": vals.get("value"), "passed": passed,
+                            "expected_pass": expected, "ok": passed == expected})
+    return out
 
 
 def find_mask(out_dir, fname, recipe):
@@ -402,6 +247,11 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
     inputs = {stem(i["path"]): i for i in b["inputs"]}
     files = [f for f in sorted(glob.glob(os.path.join(out_dir, "*__*__s*.*")))
              if OUT_RE.match(os.path.basename(f)) and os.path.basename(f).split("__")[0] in inputs]
+    reg = catalog.load(b)
+    ctl = controls(b, reg)
+    bad = [c for c in ctl if not c["ok"]]
+    log(f"Controls: {len(ctl) - len(bad)}/{len(ctl)} as expected on unchanged inputs"
+        + (f"; CHECK THESE: {', '.join(sorted({c['label'] for c in bad}))}" if bad else "."))
     panel = judge_mod.Panel(b.get("judges"), out_dir, log) if judges else None
     max_failed = (b.get("judge_when") or {}).get("max_failed_checks", 1)
     recipes_by_id = {r["id"]: r for r in b.get("recipes") or [] if isinstance(r, dict)}
@@ -434,7 +284,7 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
         else:
             p = Pair(b, inputs[inp], f, find_mask(out_dir, fname, recipe))
         jobs = [] if panel else None
-        metrics = score_pair(b, p, jobs, recipes_by_id.get(recipe))
+        metrics = score_pair(b, p, jobs, recipes_by_id.get(recipe), reg)
         fails = pixel_fails(metrics)
         group = {}
         for row, pair, opt in jobs or []:
@@ -490,7 +340,8 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
         log(f"Vision judges done: ${panel.spent:.3f} spent on new answers.")
     errors = [r for r in (results or []) if r.get("status") == "error"]
     attempted = [{"recipe": r["recipe"], "input": r["input"]} for r in (results or [])]
-    data = {"scored": scored, "errors": errors, "attempted": attempted,
+    data = {"scored": scored, "errors": errors, "attempted": attempted, "controls": ctl,
+            "metrics": {mid: {"fp": m["fp"], "source": m["source"]} for mid, m in reg.items()},
             "attempted_rows": [{"eval_cost": r.get("eval_cost")} for r in (results or [])],
             "judges": panel.judges if panel else [], "judge_cost": judge_mod.total_cost(out_dir)}
     json.dump(data, open(os.path.join(out_dir, "scores.json"), "w", encoding="utf8"), indent=1)

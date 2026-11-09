@@ -89,6 +89,33 @@ def cmd_report(a, b=None, out=None):
     print("Report →", report.build(b, out, notes, listed))
 
 
+def cmd_metrics(a):
+    from . import catalog
+    b = bench.load(a.bench)
+    reg = catalog.load(b)
+    if a.action == "markdown":
+        print(catalog.markdown(reg))
+        return
+    if a.action == "list":
+        print(f"{'id':22} {'kind':9} {'family':13} {'source':10} fingerprint")
+        for mid, m in sorted(reg.items(), key=lambda x: (x[1]["source"] != "bench", x[0])):
+            over = f"  (overrides {', '.join(m['overrides'])})" if m.get("overrides") else ""
+            print(f"{mid:22} {m['meta']['kind']:9} {m['meta']['family']:13} {m['source']:10} {m['fp']}{over}")
+        return
+    out = os.path.join(b["_dir"], "runs", "_controls")
+    os.makedirs(out, exist_ok=True)
+    bench.ensure_media(b, os.path.join(out, "media.lock.json"))
+    run.ensure_input_masks(b, out)
+    from .score import controls
+    rows = controls(b, reg)
+    for c in rows:
+        mark = "ok  " if c["ok"] else "FAIL"
+        want = "pass" if c["expected_pass"] else "fail"
+        got = "passed" if c["passed"] else "failed"
+        print(f"{mark} {c['input']:16} {c['label']:30} {c['kind']:8} value {c['value']:.4g} {got} (should {want})")
+    print(f"{sum(c['ok'] for c in rows)}/{len(rows)} controls as expected.")
+
+
 def cmd_recipes(a):
     from . import recipes as rec
     if a.action == "extract":
@@ -127,6 +154,10 @@ def main():
         if name in ("run", "score"):
             p.add_argument("--no-judges", action="store_true", help="skip the vision-model checks")
         p.set_defaults(fn=fn)
+    mp = sub.add_parser("metrics", help="list metrics (library + bench), run the controls, or print the registry")
+    mp.add_argument("action", choices=["list", "control", "markdown"])
+    mp.add_argument("bench")
+    mp.set_defaults(fn=cmd_metrics)
     rp = sub.add_parser("recipes", help="list recipe files, or extract inline recipes into files")
     rp.add_argument("action", choices=["list", "extract"])
     rp.add_argument("bench")

@@ -1,7 +1,10 @@
-# Metric registry
+# Choosing metrics
 
-Each metric is a card. Select by `dimension`, filter by `needs`, order by `trust`, and pair each
-primary metric with a cross-check from a different `family`.
+What is implemented is listed in `metric-catalog.md`, generated from the metric files (the source of
+truth). This file is guidance: which metric answers which question, and ideas that are not built
+yet (marked `planned`; a bench can implement one in its `metrics/` folder). Select by dimension,
+filter by `needs`, order by `trust`, and pair each primary metric with a cross-check from a
+different `family`.
 
 - `trust`: `deterministic` > `learned` > `judge` > `human`
 - `needs`: `reference` (the input or a target image), `region` (a mask), `text` (expected copy),

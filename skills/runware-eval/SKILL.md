@@ -132,7 +132,10 @@ it is how users discover dimensions they had not thought of.
 
 ## Step 2 — Pick metrics
 
-Load `references/metrics.md` and select per dimension:
+Metrics are files, like recipes: a curated library ships with the runner (listed in
+`references/metric-catalog.md`, generated from the code), and a bench can add its own in `metrics/`
+(or shared `metric_dirs`). `uv run --project <runner> runware-eval metrics list bench.yaml` shows
+what this bench can use. Load `references/metrics.md` for how to choose, then select per dimension:
 
 1. Drop metrics whose `needs` the user cannot supply, and tell them which dimension lost coverage.
 2. Prefer trust order: deterministic > learned > judge > human.
@@ -143,6 +146,16 @@ Load `references/metrics.md` and select per dimension:
 6. No single weighted score. Gates disqualify; ranks order the survivors, shown against cost.
 
 Show the chosen metrics, with one line on why each, and get a yes before continuing.
+
+**When no metric fits**, write one: a file in the bench's `metrics/` folder with a `META` dict and a
+`compute(pair, opt)` function, following the contract in the runner's `metric_api.py`. Set `kind`
+honestly: `preserve` (an unchanged output must pass), `change` (the task asks for change, so an
+unchanged output must fail) or `info`. Then:
+
+1. Show the user the code and get a yes: metric files run on their machine.
+2. Run `runware-eval metrics control bench.yaml`. It scores every input against an unchanged copy of
+   itself; a control that goes the wrong way means the metric or its threshold is broken.
+3. Never edit the runner's library to add a bench-specific metric.
 
 ## Step 3 — Find candidates through the MCP
 
@@ -228,6 +241,8 @@ mis-specified: fix or demote it, and say so in the caveats.
 | "I'll dry-run it to get a free price" | Dry-run is unreliable on Runware. Estimate from measured smoke costs, and say which numbers are listed. |
 | "The MCP isn't here; I'll call the API directly" | Install it (Step 0). The API without the MCP means guessing schemas. |
 | "Inputs are URLs / already uploaded, so I can skip one of the three" | Step 0 needs all three every time: the runner uses the CLI login and runs through uv. |
+| "I'll add this check to the runner's code" | Write it in the bench's `metrics/` folder, show it, run the controls. |
+| "The numbers look plausible, so the checks work" | Run `metrics control` and look at the outputs. Plausible numbers hid three broken checks in testing. |
 | "I'll put the recipes inline in bench.yaml" | One file per recipe in `recipes/`, so they can be shared and matched by fingerprint. |
 | "I'll `pip install` the runner" | Never into the user's Python. Run it through uv. |
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in and the reconnect. |

@@ -101,6 +101,13 @@ Tested on a relight with a logo: `transfer_detail` brought the lettering back wi
 `restore` was exact but visibly pasted; a masked `then` pass changed almost nothing. Pixel checks
 favour whichever method copies pixels, so judge these with the vision panel and your own eye.
 
+## Metrics: library plus your own
+
+A metric id in `evaluate` resolves to a file: first the bench's `metrics/` folder (or the folders in
+`metric_dirs`, in order), then the runner's library. A bench file with a library id overrides it.
+`task_specific` + `name: x` is the older spelling of `id: x` and still works. Every score records the
+metric's fingerprint (a hash of its file), so a changed metric is visible in the results.
+
 ## Other optional fields
 
 - `label:` on any metric gives it a readable column name in the report.
