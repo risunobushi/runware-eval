@@ -18,6 +18,8 @@ new model ships.
 /plugin install eval@runware-eval
 ```
 
+In Claude Code, `/runware-eval help` explains the skill and lists the runner commands.
+
 **Any other agent with a shell:** copy `skills/runware-eval/` to where your agent loads skills
 (`.claude/skills/`, `.cursor/skills/`, `.agents/skills/`).
 

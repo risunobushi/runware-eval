@@ -5,7 +5,8 @@ description: >
   goal and inputs. Use when the user says "which model is best for my use case", "compare these
   models", "benchmark", "A/B test models", "evaluate outputs", "did the product change", "measure
   drift / fidelity / pixel shift / aesthetics", "set up a testing bench", "re-test when new models
-  ship", or "check my migrated pipeline didn't regress". Not for a one-off generation; for that use
+  ship", or "check my migrated pipeline didn't regress". `/runware-eval help` explains it and lists its
+  commands. Not for a one-off generation; for that use
   the outcome skill (edit-image, product-photography, ...).
 ---
 
@@ -18,10 +19,48 @@ of good. The agent's job is setup and judgement. Execution belongs to the runner
 **Core rule: the user decides what "good" means; the catalog decides what is possible.** Never pick
 metrics before asking, and never claim what a model can or cannot do without reading its schema.
 
+## Help: `/runware-eval help`
+
+If the skill is called with the argument `help` (or the user only asks what this skill does or how to
+use it), reply with the text below, adapted to what is in the working folder, and stop. No preflight,
+no installs, no intake questions, no catalog calls. You may list the benches found in the working
+folder (path and goal in a few words) and say whether the Runware CLI and uv are ready, if you can
+tell from a read-only check.
+
+> **runware-eval** answers "which Runware model is best for my task?" with a bench you can re-run:
+> your inputs, a set of recipes (model, settings, prompt, mask) and the checks that measure your
+> definition of good. Images, 3D models and video are supported.
+>
+> **To start**, describe the task in plain words, e.g. "which model is best for relighting product
+> photos?". I will then:
+> 1. check the Runware CLI and uv, install what is missing, and ask you to sign in once;
+> 2. ask what to evaluate (deviation, pixel shift, identity, text and brand, prompt adherence,
+>    aesthetics, technical quality), your budget and how many models to test;
+> 3. propose checks, find candidate models, and write one recipe file per candidate;
+> 4. show a cost estimate, run a smoke round, then the full run;
+> 5. hand you one HTML report, and a blind labeling page to calibrate the checks against your eye.
+>
+> **Runner commands** (`uv run --project <runner> runware-eval <command> bench.yaml`):
+>
+> | Command | What it does |
+> |---|---|
+> | `estimate` | cost per recipe, before anything is paid |
+> | `run --round smoke` or `--round full` | generate, score and report |
+> | `score`, `report` | re-score or rebuild the report from saved results; no login needed |
+> | `label`, then `calibrate --labels <file>` | blind labeling page; agreement and suggested thresholds |
+> | `metrics list` or `metrics control` | the checks this bench can use; test them on unchanged inputs |
+> | `recipes list` or `recipes extract` | recipe files and their past runs |
+>
+> Spend is capped by `budget.max_usd` in `bench.yaml`, and an interrupted run can be run again
+> without paying twice.
+
+Do not write a dollar sign directly followed by a digit anywhere in this file: the agent harness
+replaces such tokens with the skill's arguments. Write prices as `0.006 USD`.
+
 ## Step 0 — Preflight: Runware CLI and uv, before anything else
 
-The bench needs both, every time. Check them before any other step, including the existing-bench
-question, and do not continue until both are ready. Do not substitute guessed REST calls, web
+The bench needs both, every time (a `help` call is the one exception, see above). Check them before
+any other step, including the existing-bench question, and do not continue until both are ready. Do not substitute guessed REST calls, web
 searches, or model knowledge from memory.
 
 - **Runware CLI**: the catalog (search, schemas, pricing, examples), uploads of local files at full
@@ -250,7 +289,7 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
 
 Vision-model checks run in `score` as the second stage of a funnel: only outputs that fail at most
 `judge_when.max_failed_checks` pixel checks are judged, with one combined call per judge (about
-$0.006 per judged output; cached; `--no-judges` skips them). When picking metrics in Step 2, give the
+0.006 USD per judged output; cached; `--no-judges` skips them). When picking metrics in Step 2, give the
 judges only questions no pixel check can answer. 3D outputs (GLB) and video
 outputs (MP4) need nothing extra: the runner renders or reads them into images first, see the 3D and
 video sections of `references/metrics.md`. For video recipes set `taskType: videoInference`, pass the
