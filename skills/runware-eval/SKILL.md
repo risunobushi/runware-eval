@@ -56,7 +56,7 @@ Neither needs a restart or admin rights.
 - **uv**: install it self-contained in one folder, without changing PATH or adding an updater
   (deleting the folder removes it). The installers ask nothing.
   - macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | env UV_UNMANAGED_INSTALL="$HOME/.runware-eval/tools" sh`
-  - Windows (PowerShell): `$env:UV_UNMANAGED_INSTALL="$HOME\.runware-eval	ools"; powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+  - Windows (PowerShell): `$env:UV_UNMANAGED_INSTALL="$HOME\.runware-eval\tools"; powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
   - Then call it as `~/.runware-eval/tools/uv`. If the user already has uv (or prefers `scoop install uv` /
     `brew install uv`), use that instead.
 

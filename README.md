@@ -5,8 +5,9 @@ A test bench for [Runware](https://runware.ai) models. Tell your agent what you'
 metrics that measure your definition of good, and writes a `bench.yaml` you can re-run whenever a
 new model ships.
 
-> Status: the skill sets up the bench; the runner (`runner/`) estimates, runs, scores and reports it.
-> Vision-model judges, OCR and human ranking are planned and show as *not run* in reports.
+> Status: the skill sets up the bench; the runner (`runner/`) estimates, runs, scores and reports it,
+> with pixel checks, a panel of vision-model judges, blind human labeling and calibration. OCR checks
+> are planned and show as *not run* in reports. Tested on Windows; macOS and Linux are untested.
 
 ## Install
 
@@ -48,7 +49,22 @@ uv run --project runner runware-eval estimate bench.yaml --round smoke
 uv run --project runner runware-eval run      bench.yaml --round smoke   # first input, first seed
 uv run --project runner runware-eval run      bench.yaml --round full    # stops before passing the budget
 uv run --project runner runware-eval report   bench.yaml --round full --notes notes.json
+uv run --project runner runware-eval label     bench.yaml --round full    # blind good/bad and pairwise page
+uv run --project runner runware-eval calibrate bench.yaml --round full --labels labels.json
 ```
+
+The report leads with the best recipe: fewest failed checks, then lowest cost. It names the checks
+that recipe still misses, so "best" never hides a failure.
+
+**Spend.** `budget.max_usd` is required. A run stops before it starts if the estimate passes the cap,
+and holds the cap while running: each task starts only if what is spent, what is in flight and its
+own estimate still fit, and a recipe that costs more than estimated is reserved at its real cost from
+then on. Tasks that did not start are listed in the report; raise the cap and run again to fill them
+in. A recipe with no known price must state one (`price_usd:` in its file).
+
+**Interrupted runs.** Tasks are sent with Runware's async delivery and polled, so no connection is held open while a model works. Every task is logged in `submitted.jsonl` before it is sent. Run the same command
+again and the runner first asks Runware for the results of tasks already sent; one that is still
+running is not sent a second time.
 
 Recipes are one file each in `recipes/`, fingerprinted. Copy a file into another bench to share it;
 matching past results (same fingerprint, same images, same seed) are reused instead of paid for:

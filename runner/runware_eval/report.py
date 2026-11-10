@@ -280,15 +280,15 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     seeds = sorted({s["seed"] for s in scored})
     best = order[0]
     cheapest_pass = min(passing, key=lambda r: agg[r]["cost"] or 9) if passing else None
-    # headline: the count, then the number that decides
-    if cheapest_pass and agg[cheapest_pass]["cost"] is not None:
-        headline = (f"{len(passing)} of {len(agg)} recipes pass every check. "
-                    f"Cheapest: <em>${agg[cheapest_pass]['cost']:.3f}</em> per output.")
-    elif passing:
-        headline = f"{len(passing)} of {len(agg)} recipes pass every check."
+    # headline: the recommendation, then what it costs and how many checks it passes.
+    # `best` is the first in `order`: fewest failed checks, then cheapest (so the cheapest passing one, if any)
+    ab = agg[best]
+    price = f" at <em>${ab['cost']:.3f}</em> per output" if ab["cost"] is not None else ""
+    missed = [k.split(":", 1)[1] for k, v in ab["verdict"].items() if not v]
+    if passing:
+        headline = f"Best: <em>{e(best)}</em>. Passes every check{price}."
     else:
-        headline = (f"0 of {len(agg)} recipes pass every check. "
-                    f"Fewest failed checks: <em>{agg[best]['fails']}</em>.")
+        headline = f"Best: <em>{e(best)}</em>. Passes {ab['checks'] - ab['fails']} of {ab['checks']} checks{price}."
     controls = data.get("controls", [])
     checks_spend = data.get("judge_cost", 0) + sum(r.get("eval_cost") or 0 for r in data.get("attempted_rows", []))
     out.append("<header class='hero'>"
@@ -310,11 +310,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         second = card("Cheapest that passes", f"${c['cost']:.3f}" if c["cost"] is not None else "—",
                       f"{e(cheapest_pass)} · {e(recipes.get(cheapest_pass, {}).get('model', ''))} · {c['cost_src']}")
     else:
-        second = card("Fewest failed checks", agg[best]["fails"],
-                      f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))}")
+        second = card("Best still misses", ab["fails"], e(", ".join(missed)))
     out.append("<section aria-label='Summary'><div class='cards'>"
-               + card("Pass every check", f"{len(passing)}/{len(agg)}", e(", ".join(passing)) or "none yet",
-                      lit=bool(passing))
+               + card("Best overall", f"{ab['checks'] - ab['fails']}/{ab['checks']} checks",
+                      f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))}", lit=True)
                + second
                + card("Checks not run", len(not_run), e(", ".join(not_run)) or "all ran")
                + card("Failed tasks", len(errors), e(", ".join(sorted({x["recipe"] for x in errors}))) or "none")
@@ -328,7 +327,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                 + (f"<p class='ink2'>{intro}</p>" if intro else "") + "</div>")
 
     bad_ctl = [c for c in data.get("controls", []) if not c["ok"]]
-    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl:
+    full = max(len(a["items"]) for a in agg.values())
+    partial = [f"{rid} ({len(a['items'])} of {full})" for rid, a in agg.items() if len(a["items"]) < full]
+    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial:
         out.append("<section>" + sec_head("Findings") + "<ul class='notes'>")
         out += [f"<li>{n}</li>" for n in notes.get("findings", [])]
         out += [f"<li class='warn'>{n}</li>" for n in notes.get("caveats", [])]
@@ -340,6 +341,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         for x in errors:
             out.append(f"<li class='warn'><strong>{e(x['recipe'])}</strong> on {e(x['input'])} failed: "
                        f"{e(str(x.get('error')))}</li>")
+        if partial:
+            out.append(f"<li class='warn'><strong>Fewer outputs than the other recipes:</strong> "
+                       f"{e(', '.join(partial))}. Their verdicts rest on less evidence.</li>")
         if missing:
             out.append(f"<li class='warn'><strong>No output in this folder:</strong> {e(', '.join(missing))}</li>")
         out.append("</ul></section>")

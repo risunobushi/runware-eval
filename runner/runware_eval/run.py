@@ -2,6 +2,8 @@
 import json
 import os
 import shutil
+import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -14,6 +16,84 @@ from . import bench as benchmod
 from .score import input_region
 
 MASK_MODEL = "runware:112@5"  # BiRefNet General
+
+
+GRACE_S = 1800  # a task sent less than this long ago may still be running on Runware
+
+
+class Budget:
+    """Live spend guard. A task starts only if what is spent, what is in flight and its own cost fit the
+    cap. Costs are learned during the run: in-flight and later tasks of a recipe count at the highest
+    cost seen for it, and a recipe whose cost was never measured sends one task first and waits for
+    its real cost before the rest start. What is left: a single task can pass the cap by its own
+    cost minus its estimate."""
+
+    def __init__(self, cap, spent, measured=()):
+        self.cap, self.spent = cap, spent
+        self.est, self.flying, self.known = {}, {}, set(measured)
+        self.cond = threading.Condition()
+
+    def _price(self, recipe):
+        return self.est.get(recipe, 0.0)
+
+    def take(self, recipe, est):
+        with self.cond:
+            self.est[recipe] = max(est or 0.0, self.est.get(recipe, 0.0))
+            while recipe not in self.known and self.flying.get(recipe):
+                self.cond.wait()
+            reserved = sum(n * self._price(r) for r, n in self.flying.items())
+            if self.spent + reserved + self._price(recipe) > self.cap + 1e-9:
+                return False
+            self.flying[recipe] = self.flying.get(recipe, 0) + 1
+            return True
+
+    def settle(self, recipe, actual):
+        """`actual` None: the task died midway, so assume it was billed at the current estimate."""
+        with self.cond:
+            self.flying[recipe] -= 1
+            self.spent += self._price(recipe) if actual is None else actual
+            self.est[recipe] = max(self._price(recipe), actual or 0.0)
+            self.known.add(recipe)
+            self.cond.notify_all()
+
+
+class Journal:
+    """submitted.jsonl: every task sent, by content key, written before the request leaves. A later run
+    asks Runware for that task's result before sending anything again."""
+
+    def __init__(self, out_dir):
+        self.path, self.lock, self.last = os.path.join(out_dir, "submitted.jsonl"), threading.Lock(), {}
+        if os.path.exists(self.path):
+            for line in open(self.path, encoding="utf8"):
+                if line.strip():
+                    r = json.loads(line)
+                    self.last[r["key"]] = r
+
+    def record(self, key, uid):
+        row = {"key": key, "taskUUID": uid, "ts": time.time()}
+        with self.lock:
+            self.last[key] = row
+            with open(self.path, "a", encoding="utf8") as f:
+                f.write(json.dumps(row) + "\n")
+
+
+def run_once(journal, key, task):
+    """Run a task, unless an earlier run already sent the same one: then fetch that result instead.
+    If it is still not ready and was sent recently, it is not sent again (that would bill twice)."""
+    prev = journal.last.get(key) if journal else None
+    if prev:
+        age = time.time() - prev["ts"]
+        res = api.poll_task(prev["taskUUID"], max_wait=min(300, max(0, GRACE_S - age)))
+        if res["status"] == "success":
+            return {**res, "taskUUID": prev["taskUUID"], "latency_s": None, "resumed": True}
+        age = time.time() - prev["ts"]
+        if res.get("pending") and age < GRACE_S:
+            return {"status": "error", "taskUUID": prev["taskUUID"], "latency_s": None, "waiting": True,
+                    "error": f"sent {age / 60:.0f} min ago and still running on Runware; not sent again. "
+                             f"Run again in a few minutes (after {GRACE_S // 60} min it is sent anew)."}
+    if journal:
+        journal.record(key, task["taskUUID"])
+    return api.run_task(task)
 
 
 def read_results(out_dir):
@@ -123,7 +203,7 @@ def transfer_detail(cur_path, inp_path, region, sigma_px, feather_px, out_path):
     return out_path
 
 
-def run_pipeline(j, b, out_dir, bases, lock_path):
+def run_pipeline(j, b, out_dir, bases, lock_path, journal=None):
     """Base generation (reused when an identical plain recipe already produced it), then the recipe's
     `then` step (a second task on the first output) and `post` steps (local edits)."""
     r, inp = j["_recipe"], j["_inp"]
@@ -137,7 +217,7 @@ def run_pipeline(j, b, out_dir, bases, lock_path):
         row["cost"] += cost or 0
         row["steps"].append(f"base reused from {f}")
     else:
-        res = api.run_task(j["task"])
+        res = run_once(journal, j["base_hash"], j["task"])
         if res["status"] != "success":
             return {**row, "status": "error", "error": res.get("error")}
         cur_url = res["imageURL"]
@@ -162,7 +242,7 @@ def run_pipeline(j, b, out_dir, bases, lock_path):
         params = benchmod.resolve(then.get("params", {}), ctx)
         task = {"taskType": then.get("taskType", "imageInference"), "taskUUID": str(uuid.uuid4()),
                 "model": then["model"], **params, "includeCost": True}
-        res = api.run_task(task)
+        res = run_once(journal, j["hash"] + ":then", task)
         if res["status"] != "success":
             return {**row, "status": "error", "error": f"then-step: {res.get('error')}"}
         cur_url = res["imageURL"]
@@ -222,16 +302,39 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
     log(f"{len(jobs) - len(todo)} cached, {len(todo)} to run. Spent so far ${spent:.3f}, "
         f"projected ${projected:.3f}, cap ${max_usd:.2f}.")
     if unknown:
-        log(f"No price known for: {', '.join(sorted(set(unknown)))}. They count as $0 in the projection.")
+        raise SystemExit(f"Stopped: no price known for {', '.join(sorted(set(unknown)))}. Add `price_usd: <per "
+                         "output>` to the recipe file (it does not change the fingerprint), so the cap can hold.")
     if spent + projected > max_usd:
         raise SystemExit(f"Stopped: ${spent + projected:.3f} would exceed the ${max_usd:.2f} cap. "
                          "Raise budget.max_usd in bench.yaml or run fewer recipes.")
+    budget = Budget(max_usd, spent, measured={e["recipe"] for e in est if e["est_source"] == "measured"})
+    journal = Journal(out_dir)
+    est_by = {e["hash"]: e["est_cost"] for e in est}
+    ids = ("input", "recipe", "seed", "model", "fp", "hash")
+
+    def guarded(fn):
+        """The projection above is an estimate; this holds the cap against what tasks really cost."""
+        def wrapped(j):
+            if not budget.take(j["recipe"], est_by.get(j["hash"])):
+                return {**{k: j.get(k) for k in ids}, "status": "error", "cost": None, "latency_s": None,
+                        "not_started": True, "error": f"not started: it would pass the ${max_usd:.2f} cap "
+                                                      f"(${budget.spent:.3f} spent, costs ran above the estimate)"}
+            actual = None
+            try:
+                row = fn(j)
+                actual = (row.get("spend", row.get("cost")) or 0) + (row.get("eval_cost") or 0)
+                return row
+            finally:
+                budget.settle(j["recipe"], actual)
+        return wrapped
 
     def one(j):
-        res = api.run_task(j["task"])
-        row = {k: j[k] for k in ("input", "recipe", "seed", "model", "fp", "hash")}
-        row.update(taskUUID=j["task"]["taskUUID"], status=res["status"], cost=res.get("cost"),
-                   latency_s=res.get("latency_s"), error=res.get("error"))
+        res = run_once(journal, j["hash"], j["task"])
+        row = {k: j[k] for k in ids}
+        row.update(taskUUID=res.get("taskUUID") or j["task"]["taskUUID"], status=res["status"],
+                   cost=res.get("cost"), latency_s=res.get("latency_s"), error=res.get("error"))
+        if res.get("resumed"):
+            row["resumed"] = True
         if res["status"] == "success":
             files = (res.get("outputs") or {}).get("files") or []
             url = res.get("imageURL") or res.get("videoURL") or (files[0]["url"] if files else None)
@@ -250,7 +353,8 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
 
     def report(row):
         append_result(out_dir, row)
-        status = (f"${row['cost']:.4f} · {row['latency_s']}s" if row["status"] == "success"
+        took = "fetched from an earlier run" if row.get("resumed") else f"{row['latency_s']}s"
+        status = (f"${row['cost'] or 0:.4f} · {took}" if row["status"] == "success"
                   else f"ERROR {row['error']}")
         extra = f" ({'; '.join(row['steps'])})" if row.get("steps") else ""
         log(f"  {row['input']} · {row['recipe']} · s{row['seed']}: {status}{extra}")
@@ -267,7 +371,7 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
     plain = [j for j in todo if not j.get("base_hash")]
     piped = [j for j in todo if j.get("base_hash")]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for row in pool.map(safe(one), plain):
+        for row in pool.map(safe(guarded(one)), plain):
             report(row)
     if piped:
         # plain results first, so pipelines can start from the very same base image
@@ -278,7 +382,7 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
                         and os.path.exists(os.path.join(d, r["file"])):
                     bases.setdefault(r["hash"], (d, r["file"], r.get("url"), r.get("cost")))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for row in pool.map(safe(lambda j: run_pipeline(j, b, out_dir, bases, lock_path)), piped):
+            for row in pool.map(safe(guarded(lambda j: run_pipeline(j, b, out_dir, bases, lock_path, journal))), piped):
                 report(row)
     return read_results(out_dir)
 

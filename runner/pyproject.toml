@@ -23,3 +23,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["runware_eval"]
+
+[tool.setuptools.package-data]
+runware_eval = ["metrics_lib/*.py"]

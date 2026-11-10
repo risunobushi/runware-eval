@@ -36,8 +36,9 @@ params:
     Relight this product photo using the lighting of the reference image ...
   settings: { quality: low }
   seed: $seed
+price_usd: 0.03   # per output; the estimate and the budget cap use it until a real cost is measured
 notes: >-
-  Every convention translated for this model, and the price ($0.03/output).
+  Every convention translated for this model.
 fingerprint: 8a2fdbe2577bf114   # written by runware-eval; changes when the request changes
 ```
 

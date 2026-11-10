@@ -1,7 +1,12 @@
-"""Thin Runware REST client: one task per request, polled until terminal.
+"""Thin Runware REST client: one task per request, sent async and polled until terminal.
 
 One request per task (sent concurrently by the caller) keeps failures isolated: a provider error on
 one task can turn a whole multi-task response into an error and hide the other results.
+
+Every task goes out with `deliveryMethod: async`: Runware acknowledges it at once and the result is
+fetched with `getResponse`. No connection is held open while a model works, so a dropped connection
+cannot leave a paid task in doubt, and an interrupted run can fetch its results later by task UUID.
+Verified on image, 3D, background removal and text inference (2026-11-10).
 """
 import json
 import os
@@ -17,7 +22,11 @@ UA = "runware-eval/0.1"
 
 
 class RunwareError(Exception):
-    pass
+    retry_after = None
+
+
+class NotAccepted(RunwareError):
+    """HTTP 429 or 503: Runware turned the request away, so sending it again cannot bill twice."""
 
 
 def api_key():
@@ -41,6 +50,13 @@ def post(tasks, timeout=180):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = json.loads(r.read())
     except urllib.error.HTTPError as e:
+        if e.code in (429, 503):
+            err = NotAccepted(f"HTTP {e.code} from Runware (over capacity or rate limited)")
+            try:
+                err.retry_after = float(e.headers.get("Retry-After") or 0) or None
+            except ValueError:
+                pass
+            raise err
         try:
             body = json.loads(e.read())
         except ValueError:
@@ -71,32 +87,52 @@ def _poll(uid, tries=4):
             time.sleep(3 * (i + 1))
 
 
-def _submit(task, tries=3):
-    """Submit once. On a transient failure, first ask whether the task exists (it may have been
-    accepted before the error); re-submit only if Runware has no trace of it, so nothing bills twice."""
+def _submit(task, tries=4):
+    """Send a task. Turned away (429/503): wait as told and send again, which cannot bill twice.
+    Any other transient failure (timeout, dropped connection) leaves it unknown whether Runware took
+    the task, and polling cannot tell (`getResponse` says `processing` for unknown tasks too): it is
+    then treated as sent and polled, never sent a second time."""
     for i in range(tries):
         try:
-            return post([task])
-        except Exception as exc:  # noqa: BLE001
-            if not _transient(exc) or i == tries - 1:
+            return post([task], timeout=60)
+        except NotAccepted as exc:
+            if i == tries - 1:
                 raise
-            time.sleep(5 * (i + 1))
-            try:
-                data, errors = _poll(task["taskUUID"], tries=2)
-                if data:
-                    return data, errors
-            except Exception:  # noqa: BLE001
-                pass
+            time.sleep(min(exc.retry_after or 5 * (i + 1), 60))
+        except Exception as exc:  # noqa: BLE001
+            if not _transient(exc):
+                raise
+            return [{"taskUUID": task["taskUUID"], "status": "processing"}], []
 
 
-def run_task(task, poll_every=3.0, max_wait=900):
-    """Send one task and wait for a terminal result. Never re-sends a task Runware already has."""
+def run_task(task, poll_every=1.0, max_wait=900):
+    """Send one task (async delivery) and poll until a terminal result. Never re-sends a task Runware
+    may already have. `latency_s` is send to first successful poll, so it is rounded up to the poll
+    interval (1 s for the first 20 s, then growing to 3 s)."""
     t0 = time.time()
     uid = task["taskUUID"]
     try:
-        data, errors = _submit(task)
+        data, errors = _submit({**task, "deliveryMethod": "async"})
     except Exception as exc:  # noqa: BLE001  one task's failure must not stop a run
         return {"status": "error", "error": f"submit failed: {exc}", "latency_s": round(time.time() - t0, 1)}
+    return _wait(uid, data, errors, t0, poll_every, max_wait)
+
+
+def poll_task(uid, max_wait=0, poll_every=1.0):
+    """Ask for the result of a task sent earlier, without sending anything. Polling never bills.
+
+    Runware answers `processing` for a task that is running, one it never received and one whose result
+    has expired alike, so a result that is still not there after `max_wait` comes back with
+    `pending: True`: the caller decides, from the task's age, whether it can still be running."""
+    t0 = time.time()
+    try:
+        data, errors = _poll(uid)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"polling failed: {exc}", "pending": True, "latency_s": 0.0}
+    return _wait(uid, data, errors, t0, poll_every, max_wait)
+
+
+def _wait(uid, data, errors, t0, poll_every, max_wait):
     while True:
         err = next((e for e in errors if e.get("taskUUID") in (uid, None)), None)
         if err:
@@ -108,14 +144,17 @@ def run_task(task, poll_every=3.0, max_wait=900):
         if item and item.get("status") == "error":
             return {"status": "error", "error": item.get("error", "task failed"),
                     "latency_s": round(time.time() - t0, 1)}
-        if time.time() - t0 > max_wait:
-            return {"status": "error", "error": f"timed out after {max_wait}s",
+        if time.time() - t0 >= max_wait:
+            return {"status": "error", "error": f"timed out after {max_wait}s", "pending": True,
                     "latency_s": round(time.time() - t0, 1)}
         time.sleep(poll_every)
+        if time.time() - t0 > 20:  # 1 s polls while latency is being measured closely, then back off
+            poll_every = min(poll_every * 1.5, 3.0)
         try:
             data, errors = _poll(uid)
         except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "error": f"polling failed: {exc}", "latency_s": round(time.time() - t0, 1)}
+            return {"status": "error", "error": f"polling failed: {exc}", "pending": True,
+                    "latency_s": round(time.time() - t0, 1)}
 
 
 def download(url, path):
@@ -154,8 +193,10 @@ def listed_price(air):
 
 
 def recipe_price(recipe):
-    """Price per output for a recipe with no measured runs: the first `$x` in its notes (written by
-    whoever set the recipe up, tier-specific), else the highest price in the model's schema."""
-    import re
+    """Price per output for a recipe with no measured runs: its `price_usd` field, else the first `$x`
+    in its notes (written by whoever set the recipe up, tier-specific), else the highest price in the
+    model's schema."""
+    if isinstance(recipe.get("price_usd"), (int, float)):
+        return float(recipe["price_usd"])
     m = re.search(r"\$\s?(\d+(?:\.\d+)?)", recipe.get("notes") or "")
     return float(m.group(1)) if m else listed_price(recipe["model"])
