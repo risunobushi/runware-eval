@@ -51,8 +51,7 @@ uv run --project runner runware-eval estimate bench.yaml --round smoke
 uv run --project runner runware-eval run      bench.yaml --round smoke   # first input, first seed
 uv run --project runner runware-eval run      bench.yaml --round full    # stops before passing the budget
 uv run --project runner runware-eval report   bench.yaml --round full --notes notes.json
-uv run --project runner runware-eval label     bench.yaml --round full    # blind good/bad and pairwise page
-uv run --project runner runware-eval calibrate bench.yaml --round full --labels labels.json
+uv run --project runner runware-eval calibrate bench.yaml --round full --labels labels.json   # labels exported from the report
 ```
 
 **Outputs.** Images are scored directly. 3D models (GLB) are rendered to the view that matches the
@@ -66,8 +65,13 @@ four written for one bench.
 The report keeps three things apart. **Measured values** are the same for every user and every re-run.
 The **verdict** ("best against this brief's checks": fewest failed checks, then lowest cost, with the
 checks it still misses named) depends on the thresholds in `bench.yaml`, which are a judgement for one
-brief. **Your pick** appears once you have labeled outputs blind: it is your preference, shown beside
+brief. **Your pick** appears once you have labeled outputs: it is your preference, shown beside
 the verdict and never applied to the bench. When the two disagree, the report says so.
+
+**Labeling is in the report.** Under "Your labels" you mark outputs good or bad and pick the better of
+random pairs, with recipe names hidden. Labels stay in your browser; agreement with each check, the
+threshold that would agree best and your own ranking are computed in the page as you click. "Export
+labels.json" hands them to `runware-eval calibrate` or to a colleague, who can import them.
 
 **Spend.** `budget.max_usd` is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its

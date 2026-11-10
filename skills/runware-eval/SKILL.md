@@ -38,7 +38,8 @@ tell from a read-only check.
 >    aesthetics, technical quality), your budget and how many models to test;
 > 3. propose checks, find candidate models, and write one recipe file per candidate;
 > 4. show a cost estimate, run a smoke round, then the full run;
-> 5. hand you one HTML report, and a blind labeling page to calibrate the checks against your eye.
+> 5. hand you one HTML report, where you can also label outputs blind to see how the checks compare
+>    with your eye.
 >
 > **Runner commands** (`uv run --project <runner> runware-eval <command> bench.yaml`):
 >
@@ -47,7 +48,8 @@ tell from a read-only check.
 > | `estimate` | cost per recipe, before anything is paid |
 > | `run --round smoke` or `--round full` | generate, score and report |
 > | `score`, `report` | re-score or rebuild the report from saved results; no login needed |
-> | `label`, then `calibrate --labels <file>` | blind labeling page; agreement and suggested thresholds |
+> | `calibrate --labels <file>` | take labels exported from the report: agreement and suggested thresholds |
+> | `label` | a separate blind labeling page covering every seed |
 > | `metrics list` or `metrics control` | the checks this bench can use; test them on unchanged inputs |
 > | `recipes list` or `recipes extract` | recipe files and their past runs |
 >
@@ -279,13 +281,17 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
    report, not loose images.
 
-5. **Calibrate against the user's eye** (after the smoke round, and again after the full run):
-   `uv run --project <runner> runware-eval label bench.yaml --round <r>` makes a blind labeling page
-   (good or bad, and "which is better" on random pairs). The user labels what they can and downloads
-   `labels.json`; `runware-eval calibrate bench.yaml --round <r> --labels <file>` reports how often
-   each check agreed with them, the threshold that would agree best, which rank metrics order their
-   good above their bad, and a human ranking (Bradley-Terry). Show the suggestions; change
-   `bench.yaml` only with the user's yes. Below about 20 labels, call the suggestions hints.
+5. **Calibrate against the user's eye** (after the smoke round, and again after the full run). The
+   report has the labeling built in: under "Your labels" the user marks outputs good or bad and picks
+   the better of random pairs, with recipe names hidden. The page keeps the labels in their browser
+   and shows at once how often each check agreed with them, the threshold that would agree best, which
+   rank metrics order their good above their bad, and their own ranking (Bradley-Terry), with "Your
+   pick" next to the headline. No command is needed for that. You cannot see labels that live in
+   their browser: to act on them, ask the user to press "Export labels.json" and run
+   `runware-eval calibrate bench.yaml --round <r> --labels <file>`, which prints the same analysis
+   and stores the labels with the run, so the rebuilt report opens with them. Show the suggestions;
+   change `bench.yaml` only with the user's yes. Below about 20 labels, call the suggestions hints.
+   (`runware-eval label` still builds a separate page that covers every seed, not just the first.)
    Keep the three layers apart when you report: measured values are shared evidence; pass or fail
    is this brief's thresholds; labels and rankings are this user's preference. The report shows
    "Your pick" beside "Best against this brief's checks"; when they disagree, say so and do not

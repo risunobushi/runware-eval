@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 from skimage.color import deltaE_ciede2000, rgb2lab
 
+from . import _labeling
 from ._assets import CSS, FONTS
 from .bench import stem
 from .score import Pair, erode, find_mask
@@ -279,7 +280,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             it["_clip_path"] = os.path.join(out_dir, s["clip"])
         key = f"{s['input']}|{s['recipe']}"
         if key not in items or s["seed"] < items[key]["_seed"]:
-            items[key] = {**it, "_seed": s["seed"]}
+            items[key] = {**it, "_seed": s["seed"], "file": s["file"], "input": s["input"], "recipe": s["recipe"]}
 
     # video previews: the first seed of each recipe, embedded while the report stays within the size budget
     clip_bytes, clips_left_out = 0, 0
@@ -296,7 +297,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
 
     title = b.get("title") or "Which recipe works best?"
     out = [f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
-           f"content='width=device-width,initial-scale=1'><title>{e(title)}</title>{FONTS}<style>{CSS}</style></head>"
+           f"content='width=device-width,initial-scale=1'><title>{e(title)}</title>{FONTS}<style>{CSS}{_labeling.CSS}</style></head>"
            f"<body><div class='wrap'>"]
     seeds = sorted({s["seed"] for s in scored})
     best = order[0]
@@ -314,22 +315,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     else:
         headline = (f"Best against this brief's checks: <em>{e(best)}</em>. Passes {ab['checks'] - ab['fails']} "
                     f"of {ab['checks']}{price}.")
-    cal_file = os.path.join(out_dir, "calibration.json")
-    ranking = (json.load(open(cal_file, encoding="utf8")).get("human_ranking") or {}) if os.path.exists(cal_file) else {}
-    ranking = {r: v for r, v in ranking.items() if r in agg}
-    pick = max(ranking, key=lambda r: ranking[r]["score"]) if ranking else None
-    pick_line = pick_card = ""
-    if pick:
-        pv, pa = ranking[pick], agg[pick]
-        wins = f"{pv['wins']:g} of {pv['games']:g} blind comparisons won"
-        pcost = f", ${pa['cost']:.3f} per output" if pa["cost"] is not None else ""
-        if pick == best:
-            verdict = "the same recipe the checks favour"
-        else:
-            verdict = (f"passes {pa['checks'] - pa['fails']} of {pa['checks']} checks{pcost}. Your eye and this "
-                       f"brief's checks disagree: read the measurements below before choosing")
-        pick_line = (f"<p class='goal'><strong>Your pick: {e(pick)}</strong> ({wins}), {verdict}. "
-                     f"Your labels are your preference, not a threshold for anyone else.</p>")
+    pick_line = "<p class='goal' id='pick-line' hidden></p>"  # filled in by the page from the reader's labels
     controls = data.get("controls", [])
     checks_spend = data.get("judge_cost", 0) + sum(r.get("eval_cost") or 0 for r in data.get("attempted_rows", []))
     out.append("<header class='hero'>"
@@ -356,8 +342,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                + card("Best against the checks", f"{ab['checks'] - ab['fails']}/{ab['checks']} checks",
                       f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))}", lit=True)
                + second
-               + (card("Your pick (blind pairs)", f"{ranking[pick]['wins']:g}/{ranking[pick]['games']:g} won",
-                       f"{e(pick)} · {e(recipes.get(pick, {}).get('model', ''))}", lit=True) if pick else "")
+               + "<div class='card lit' id='pick-card' hidden><span class='lab'>Your pick (blind pairs)</span>"
+                 "<span class='big' id='pick-big'></span><span class='strip' id='pick-foot'></span></div>"
                + card("Checks not run", len(not_run), e(", ".join(not_run)) or "all ran")
                + card("Failed tasks", len(errors), e(", ".join(sorted({x["recipe"] for x in errors}))) or "none")
                + "</div></section>")
@@ -391,40 +377,14 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             out.append(f"<li class='warn'><strong>No output in this folder:</strong> {e(', '.join(missing))}</li>")
         out.append("</ul></section>")
 
-    # calibration and human ranking (from the labeling page)
-    cal_path = os.path.join(out_dir, "calibration.json")
-    if os.path.exists(cal_path):
-        cal = json.load(open(cal_path, encoding="utf8"))
-        out.append("<section>" + sec_head(
-            "Checks vs your labels",
-            f"Your preference, set against this brief's thresholds: it informs your choice and changes "
-            f"nothing for other users. {cal['labeled']} outputs labeled blind ({cal['good']} good). Balanced "
-            f"agreement: 50% = chance. "
-            f"{'Few labels: treat suggestions as hints. ' if cal.get('few_labels') else ''}Suggestions are not "
-            f"applied to <span class='mono'>bench.yaml</span>."))
-        if cal.get("gates"):
-            out.append("<div class='tablewrap'><table><thead><tr><th>Check</th><th>Threshold</th><th>Agrees with you"
-                       "</th><th>Suggested</th><th>Would agree</th></tr></thead><tbody>"
-                       + "".join(f"<tr><td>{e(g['label'])}</td><td class='mono'>{e(g['key'])}: {fmtv(g['threshold_now'])}"
-                                 f"</td><td class='mono'>{g['agreement_now']:.0%}</td><td class='mono'>"
-                                 f"{fmtv(g['suggested']) if g['suggested'] != g['threshold_now'] else '—'}</td>"
-                                 f"<td class='mono'>{g['agreement_suggested']:.0%}</td></tr>" for g in cal["gates"])
-                       + "</tbody></table></div>")
-        if cal.get("ranks"):
-            out.append("<div class='tablewrap'><table><thead><tr><th>Rank metric</th><th>Orders your good above "
-                       "your bad (AUC)</th></tr></thead><tbody>"
-                       + "".join(f"<tr><td>{e(r['label'])}</td><td class='mono'>{r['auc']:.2f}"
-                                 f"{' · weak' if r['auc'] < 0.7 else ''}</td></tr>" for r in cal["ranks"])
-                       + "</tbody></table></div>")
-        if cal.get("human_ranking"):
-            hr = sorted(cal["human_ranking"].items(), key=lambda x: -x[1]["score"])
-            out.append("<h3>Human ranking</h3><div class='tablewrap'><table><thead><tr><th>#</th><th>Recipe</th>"
-                       "<th>Score (1.0 = average)</th><th>Wins</th></tr></thead><tbody>"
-                       + "".join(f"<tr><td class='rank'>{i}</td><td>{e(r)}</td><td class='mono'>{v['score']:.2f}</td>"
-                                 f"<td class='mono'>{v['wins']:g} / {v['games']:g}</td></tr>"
-                                 for i, (r, v) in enumerate(hr, 1))
-                       + "</tbody></table></div>")
-        out.append("</section>")
+    # labeling, agreement with the checks and the reader's own ranking: all computed in the page
+    initial = {}
+    labels_path = os.path.join(out_dir, "labels.json")
+    if os.path.exists(labels_path):  # labels given to `runware-eval calibrate` travel with the report
+        initial = json.load(open(labels_path, encoding="utf8"))
+    cal_data, lab_data = _labeling.data(scored, items, title, os.path.basename(out_dir.rstrip("/\\")),
+                                        {"labels": initial.get("labels", {}), "pairs": initial.get("pairs", [])})
+    out.append("<section id='labels'>" + sec_head("Your labels") + _labeling.section(len(lab_data["pairs"])) + "</section>")
 
     # trade-off chart
     rep = b.get("report") or {}
@@ -561,10 +521,12 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "recipe file and run again. Outputs already measured are reused by fingerprint.</p></div>"
                "<code>runware-eval run bench.yaml</code></section>")
 
-    payload = {"inputs": in_order, "order": order, "originals": originals,
+    payload = {"inputs": in_order, "order": order, "originals": originals, "cal": cal_data, "lab": lab_data, "best": best,
+               "recipes": {r: {"checks": a["checks"], "fails": a["fails"], "cost": a["cost"],
+                               "model": recipes.get(r, {}).get("model", "")} for r, a in agg.items()},
                "items": {k: {kk: vv for kk, vv in v.items() if kk not in ("thumb", "_seed", "strip")} for k, v in items.items()}}
     out.append(f"<div class='tip' role='tooltip'></div><script type='application/json' id='data'>{json.dumps(payload)}"
-               f"</script><script>{JS}</script></div></body></html>")
+               f"</script><script>{JS}{_labeling.JS}</script></div></body></html>")
     out_path = out_path or os.path.join(out_dir, "report.html")
     open(out_path, "w", encoding="utf8").write("".join(out))
     return out_path
