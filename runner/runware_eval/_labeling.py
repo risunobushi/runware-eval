@@ -192,9 +192,11 @@ function calibrate(cal, labels, pairs){
     line.hidden = card.hidden = !top;
     if (!top) return;
     const [pick, pv] = top, pa = D.recipes[pick], wins = `${+pv.wins.toFixed(1)} of ${+pv.games.toFixed(1)} blind comparisons won`;
-    const verdict = pick === D.best ? 'the same recipe the checks favour'
-      : `passes ${pa.checks - pa.fails} of ${pa.checks} checks${pa.cost !== null ? ', $' + pa.cost.toFixed(3) + ' per output' : ''}. `
-        + `Your eye and this brief's checks disagree: read the measurements below before choosing`;
+    const stand = [pa.checks ? `passes ${pa.checks - pa.fails} of ${pa.checks} checks` : '',
+                   pa.place !== null ? `average place ${pa.place.toFixed(1)} on the measurements` : '',
+                   pa.cost !== null ? '$' + pa.cost.toFixed(3) + ' per output' : ''].filter(Boolean).join(', ');
+    const verdict = pick === D.best ? 'the same recipe the standings favour'
+      : `${stand}. Your eye and this brief's standings disagree: read the measurements below before choosing`;
     line.innerHTML = `<strong>Your pick: ${esc(pick)}</strong> (${wins}), ${verdict}. Your labels are your preference, not a threshold for anyone else.`;
     $('pick-big').textContent = `${+pv.wins.toFixed(1)}/${+pv.games.toFixed(1)} won`;
     $('pick-foot').textContent = `${pick} · ${pa.model}`;

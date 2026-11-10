@@ -67,6 +67,7 @@ class Pair:
 
     def __init__(self, b, inp, out_path, out_mask_path):
         self.src = os.path.join(b["_dir"], inp["path"])
+        self.bench = b
         self.rgb_in, (self.W, self.H) = load_rgb(self.src)
         self.rgb_out, self.native = load_rgb(out_path, (self.W, self.H))
         self.lab_in, self.lab_out = rgb2lab(self.rgb_in), rgb2lab(self.rgb_out)
@@ -124,6 +125,55 @@ def check(vals, opt):
     return all(tests) if tests else None
 
 
+LIMIT_KEYS = ("min", "max", "max_px", "aspect_tolerance", "abs_max", "mean_max", "p95_max", "dL_min", "dL_max")
+
+
+def row_mode(spec, opt):
+    """A measurement with a limit next to it is a pass/fail check ("gate"); without one it only places
+    the recipes ("rank"). Nobody has to choose: the report uses both. A dimension-wide `mode` from an
+    older bench still wins."""
+    if spec.get("mode"):
+        return spec["mode"]
+    limited = any(k in opt for k in LIMIT_KEYS) or re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
+    return "gate" if limited else "rank"
+
+
+def coverage(b):
+    """`requirements` in bench.yaml lists what the brief asks, each with the labels of the checks that
+    measure it. Returns (rows, warnings): a requirement nothing measures, or that has no limit, is a
+    hole a recipe can fall through unnoticed."""
+    limits = {}
+    for spec in (b.get("evaluate") or {}).values():
+        for opt in spec.get("metrics", []):
+            limits[label(opt)] = row_mode(spec, opt) == "gate"
+    rows, warn = [], []
+    reqs = b.get("requirements") or []
+    if not reqs:
+        warn.append("bench.yaml has no `requirements`: nothing shows which part of the brief each check covers.")
+    for r in reqs:
+        need = r.get("need", "") if isinstance(r, dict) else str(r)
+        names = (r.get("checks") or []) if isinstance(r, dict) else []
+        checks = [{"label": n, "known": n in limits, "limit": limits.get(n, False)} for n in names]
+        known = [c for c in checks if c["known"]]
+        status = "limit" if any(c["limit"] for c in known) else "measured" if known else "none"
+        rows.append({"need": need, "checks": checks, "status": status})
+        for c in checks:
+            if not c["known"]:
+                warn.append(f"requirement '{need}' names a check that is not in `evaluate`: {c['label']}")
+        if status == "none":
+            warn.append(f"nothing measures: {need}")
+        elif status == "measured":
+            warn.append(f"measured, but no limit (cannot fail a recipe): {need}")
+    if limits and not any(limits.values()):
+        warn.append("no check has a limit: recipes can only be placed, none can fail.")
+    used = {c["label"] for r in rows for c in r["checks"]}
+    if reqs:
+        for n in limits:
+            if n not in used:
+                warn.append(f"check '{n}' is not tied to any requirement")
+    return rows, warn
+
+
 NAMES = {
     "size_aspect": "Aspect", "phase_correlation": "Shift", "mask_iou": "Outline", "deltaE2000_region": "Colour",
     "ssim_region": "Structure", "sharpness_laplacian": "Sharpness", "lr_lighting_shift": "Key light",
@@ -160,7 +210,7 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
     reg = reg if reg is not None else catalog.load(b)
     for dim, spec in (b.get("evaluate") or {}).items():
         for opt in spec.get("metrics", []):
-            row = {"dimension": dim, "mode": spec.get("mode", "gate"), "id": opt["id"], "label": label(opt),
+            row = {"dimension": dim, "mode": row_mode(spec, opt), "id": opt["id"], "label": label(opt),
                    "thresholds": {k: v for k, v in opt.items() if k not in (
                        "id", "name", "label", "region", "rule", "on", "judges", "questions", "rubric", "scale")}}
             legacy = re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
@@ -204,9 +254,9 @@ def controls(b, reg):
         mask = os.path.join(b["_dir"], prod) if isinstance(prod, str) and not prod.startswith("auto:") else None
         p = Pair(b, inp, src, mask)
         for dim, spec in (b.get("evaluate") or {}).items():
-            if spec.get("mode", "gate") != "gate":
-                continue
             for opt in spec.get("metrics", []):
+                if row_mode(spec, opt) != "gate":
+                    continue
                 m = reg.get(metric_id(opt))
                 if m is None or opt["id"] in JUDGED or m["meta"].get("kind") not in ("preserve", "change"):
                     continue

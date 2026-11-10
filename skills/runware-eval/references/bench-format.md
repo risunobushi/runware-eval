@@ -11,7 +11,8 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `goal` | The user's goal in their own words. |
 | `inputs` | Files or URLs. Each may carry its own `region` masks and expected `text`. |
 | `regions` | Named masks: a file path, or `auto:<model AIR>` to generate one on Runware (e.g. BiRefNet). |
-| `evaluate` | The dimensions the user chose. Per dimension: `mode` (`gate` or `rank`) and `metrics` (ids from `metrics.md` with thresholds). |
+| `evaluate` | The dimensions the user chose. Per dimension: `metrics` (ids from `metrics.md`). A metric with a limit (`min`, `max`, `max_px`, `abs_max`, `mean_max`, `p95_max`, `dL_min`, `dL_max`, `aspect_tolerance`) is a pass/fail check; one without is measured only. Both count in the report: recipes are sorted by failed checks, then by average place on the measurements, then by cost. No `mode` is needed (a dimension-wide `mode: gate` or `mode: rank` from older benches still works). |
+| `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `estimate` and `run` warn about a requirement nothing measures or that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
 | `calibration` | For judge or aesthetic metrics: how many outputs the user labels. |
 | `budget` | `max_usd` for one full run. The runner refuses to start above it. |
 | `seeds` | Seeds per recipe in the full run (default `[1, 2, 3]`); the smoke round uses the first. |
@@ -132,22 +133,18 @@ inputs:
 
 evaluate:
   pixel_shift:
-    mode: gate
     metrics:
       - { id: size_aspect }
       - { id: phase_correlation, max_px: 1 }
   deviation:
-    mode: gate
     metrics:
       - { id: deltaE2000_region, region: product, mean_max: 1.0, p95_max: 2.0 }
       - { id: ssim_region, region: product, min: 0.98 }
       - { id: deltaE2000_region, region: not(product), mean_max: 1.5 }
   prompt_adherence:
-    mode: gate
     metrics:
       - { id: task_specific, name: contact_shadow, below: product, dL_min: 8, dL_max: 30 }
-  aesthetics:
-    mode: rank
+  aesthetics:                  # no limits: measured, and used to place the recipes
     metrics:
       - { id: vlm_rubric, judges: [3 vision models from different providers] }
       - { id: pairwise_human }

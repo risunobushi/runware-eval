@@ -62,8 +62,14 @@ embeds a small preview of each clip. Metrics are one file each: a library ships 
 (`runner/runware_eval/metrics_lib/`), a bench adds its own in `metrics/`, and `examples/metrics/` has
 four written for one bench.
 
+A bench lists what the brief asks (`requirements`) and which checks answer each part. A requirement
+nothing measures, or that has no limit, is printed before a run and shown in the report, so a hole in
+the bench is visible instead of silently missing from the standings. When no stock metric measures a
+requirement, the agent writes one for the bench.
+
 The report keeps three things apart. **Measured values** are the same for every user and every re-run.
-The **verdict** ("best against this brief's checks": fewest failed checks, then lowest cost, with the
+The **verdict** ("best against this brief's checks": fewest failed checks, then best average place on
+the measurements, then lowest cost, with the
 checks it still misses named) depends on the thresholds in `bench.yaml`, which are a judgement for one
 brief. **Your pick** appears once you have labeled outputs: it is your preference, shown beside
 the verdict and never applied to the bench. When the two disagree, the report says so.

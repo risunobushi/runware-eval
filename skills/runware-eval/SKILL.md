@@ -161,20 +161,58 @@ it is how users discover dimensions they had not thought of.
 
    Cost, latency and failure rate are always measured. Say so.
 3. **Follow-ups only for the chosen dimensions**: which region must stay fixed (do they have masks,
-   or should the bench generate them), expected text, reference identity, and for each dimension
-   whether it is a **gate** (must pass) or a **rank** (order the survivors).
+   or should the bench generate them), expected text, reference identity. Do not ask the user to
+   choose between "gate" and "rank", and do not use those words with them: every measurement counts
+   in the report either way (see Step 2, point 6).
 4. **Budget and size:** the budget cap in USD for one full run, and the **maximum number of models**
    to test (e.g. 3 or 5; it cuts time and spend). Write it as `max_models` in `bench.yaml` and
    propose exactly that many in Step 3; the runner refuses more. Seeds: 1 in the smoke round, **3 in
    the full run** (`seeds: [1, 2, 3]`), so one unlucky or lucky generation does not decide: each
    check is judged by `pass_rule` (default `majority` of seeds, per input; also `all` or `any`).
 
-## Step 2 — Pick metrics
+## Step 2 — Turn the brief into checks
 
 Metrics are files, like recipes: a curated library ships with the runner (listed in
 `references/metric-catalog.md`, generated from the code), and a bench can add its own in `metrics/`
 (or shared `metric_dirs`). `uv run --project <runner> runware-eval metrics list bench.yaml` shows
-what this bench can use. Load `references/metrics.md` for how to choose, then select per dimension:
+what this bench can use.
+
+**Start from the brief, not from the library.** The library covers common cases (a product that must
+not change, video stability, mesh facts). Many briefs are about something else (an illustration
+style, a layout, a character across several images), and even a familiar brief usually has one
+requirement no stock metric answers. A requirement without a check is invisible in the report: a
+recipe can fail it completely and still come first. So, before choosing any metric:
+
+1. **List the requirements.** Take the goal apart, clause by clause, into statements an output either
+   meets or does not: what must stay, what must change, what must appear, what must not appear. Add
+   the ones the inputs imply: every file the user supplied is there for a reason (a reference
+   background means "the scene is this background"; a style reference means "the output has this
+   style"). Add "the task was done at all" for every change the brief asks for.
+2. **Give each requirement a measurement of that requirement**, not of something near it. Use a
+   library metric when one measures it; otherwise write a metric for it (below). Do not leave a
+   requirement to the vision judges alone when pixels can answer it; use the judges for what only an
+   eye can answer, and as the cross-check from a different family.
+3. **Try lazy outputs in your head.** For each of these, name the check that fails it: the input
+   returned unchanged; the subject pasted on top with nothing else done; the right subject in the
+   wrong scene or style; a beautiful image that ignores the brief. If one of them fails nothing, a
+   requirement is missing or has no limit.
+4. **Write it down** as `requirements:` in `bench.yaml`: each need in the user's words, with the
+   labels of the checks that answer it. `estimate` and `run` print what is uncovered before anything
+   is paid, and the report shows the list, so a hole is visible to the reader instead of hidden. If
+   a requirement cannot be measured yet, keep it in the list with no checks and tell the user.
+
+Show the user this list as a table (requirement, measured by, limit) when asking for sign-off.
+
+Writing a metric is normal work here, not a last resort. Think in what can be computed from the
+input, the output, their masks and any reference image (`media(pair, "<name>")` reads one): colour
+distributions and palettes, edges and line weight, texture and flatness, layout and position of
+masked regions, similarity of a region to a reference, change over frames. For an illustration
+bench, for example: distance between the output's palette and the style reference's, edge density
+and stroke width against the reference, number of flat colour areas, the character's proportions
+across images. Name what the number means in the `description`, and test it (controls, below)
+before trusting it.
+
+Then load `references/metrics.md` for how to choose among existing metrics, and select per dimension:
 
 1. Drop metrics whose `needs` the user cannot supply, and tell them which dimension lost coverage.
 2. Prefer trust order: deterministic > learned > judge > human.
@@ -183,18 +221,36 @@ what this bench can use. Load `references/metrics.md` for how to choose, then se
 5. Aesthetics or any judge metric: plan the calibration step (Step 5) — the user labels outputs
    good or bad, blind; metrics that disagree with them are flagged, and the blind pairwise ranking
    becomes the ranking that counts.
-6. No single weighted score. Gates disqualify; ranks order the survivors, shown against cost.
+6. **Limits and places both always count; the user does not choose a mode.** Do not write `mode:`
+   in `bench.yaml`. A metric with a limit next to it (`min`, `max`, `mean_max`, ...) is a pass/fail
+   check; a metric without one is only measured. The report sorts recipes by failed checks, then by
+   average place across the dimensions (place 1 = best on a measurement, averaged inside each
+   dimension, then across dimensions), then by cost. So:
+   - Give a limit to every metric that has a defensible one: the default in `references/metrics.md`,
+     or what the brief implies ("the logo must stay readable"). Aim for at least one limit per chosen
+     dimension, and one on the metric that says whether the task was done at all (e.g. the camera did
+     orbit): without it, a recipe that does nothing can place well on every "nothing changed" metric.
+   - Leave a metric without a limit only when no honest limit exists yet (judges and aesthetics before
+     calibration, a new bench-specific metric before the smoke round). After the smoke round, propose
+     limits from what was measured.
+   - Say it to the user in plain words: "these are the limits an output must meet; everything else is
+     measured and used to place the recipes". A failed check counts against a recipe in the report; it
+     does not remove the recipe from the run or from a later step.
+   - A metric only places recipes when its `META` has a `direction` (`lower`, `higher` or
+     `closer_to_zero`). Set it in every metric you write.
 
 Show the chosen metrics, with one line on why each, and get a yes before continuing.
 
-**When no metric fits**, write one: a file in the bench's `metrics/` folder with a `META` dict and a
+**To write a metric**: a file in the bench's `metrics/` folder with a `META` dict and a
 `compute(pair, opt)` function, following the contract in the runner's `metric_api.py`. Set `kind`
 honestly: `preserve` (an unchanged output must pass), `change` (the task asks for change, so an
 unchanged output must fail) or `info`. Then:
 
 1. Show the user the code and get a yes: metric files run on their machine.
 2. Run `runware-eval metrics control bench.yaml`. It scores every input against an unchanged copy of
-   itself; a control that goes the wrong way means the metric or its threshold is broken.
+   itself; a control that goes the wrong way means the metric or its threshold is broken. For a
+   metric that compares with a reference image, also check by hand that the reference scores as a
+   match and an unrelated image does not.
 3. Never edit the runner's library to add a bench-specific metric.
 
 Four worked examples of bench-specific metrics (written for a relighting bench) are in the repo's
@@ -308,9 +364,12 @@ start image in `inputs.frameImages`, switch audio and prompt rewriting off, and 
 (video is priced per second). Metrics marked `planned` in the
 registry (OCR) show as *not run* in the report. Say so; never present them as passed.
 
-**Before reporting, check the gates against the outputs.** A gate that every recipe fails, or one that
-passes something visibly wrong (e.g. a hue-only backdrop check passing a black backdrop), is
-mis-specified: fix or demote it, and say so in the caveats.
+**Before reporting, check the limits and the standings against the outputs.** A check that every
+recipe fails, or one that passes something visibly wrong (e.g. a hue-only backdrop check passing a
+black backdrop), is mis-specified: fix its limit or remove the limit, and say so in the caveats. If the
+report's best recipe is visibly not the best (it places well by doing nothing, or one dimension has no
+limit), add the missing limit rather than explaining it away. A report whose headline says "No
+pass/fail limits are set" means Step 2, point 6 was skipped.
 
 ## Red flags — stop and correct
 

@@ -26,6 +26,8 @@ A metric file is a small Python module with:
     pair.boxes                  named boxes of the input
     pair.mesh                   mesh facts for 3D outputs (faces, parts, watertight, texture_px, file_mb), else None
     pair.m_out                  the output's own product mask, or None when there is none
+    media(pair, name)           a reference image named at the top level of bench.yaml (a target background, a
+                                style or lighting reference), resized to the input's size
     video_flow(pair)            for video outputs: optical flow between consecutive analysis frames, and the grey frames
     video(pair)                 for video outputs: a dict with `frames` (N, h, w, 3 uint8 RGB, `analysis_fps`
                                 frames per second, longest side 384 px) and the clip's facts (duration,
@@ -41,7 +43,22 @@ from skimage.color import deltaE_ciede2000, rgb2lab
 from skimage.metrics import structural_similarity
 
 __all__ = ["np", "cv2", "rgb2lab", "deltaE_ciede2000", "structural_similarity", "erode", "mesh_value", "video",
-           "out_mask", "video_flow"]
+           "out_mask", "video_flow", "media"]
+
+
+def media(pair, name, fit=True):
+    """A top-level media entry of bench.yaml (e.g. `background: { path: ... }`, a style or lighting
+    reference) as a float RGB array in 0..1. `fit` resizes it to the input's size, so it lines up with
+    pair.rgb_out. Raises KeyError when the bench has no such entry ('not run')."""
+    entry = getattr(pair, "bench", {}).get(name)
+    if not (isinstance(entry, dict) and "path" in entry):
+        raise KeyError(f"'{name}' is not a top-level media entry in bench.yaml")
+    import os
+    from PIL import Image
+    im = Image.open(os.path.join(pair.bench["_dir"], entry["path"])).convert("RGB")
+    if fit and im.size != (pair.W, pair.H):
+        im = im.resize((pair.W, pair.H), Image.BICUBIC)
+    return np.asarray(im).astype(np.float64) / 255.0
 
 
 def erode(mask, pct=0.15):

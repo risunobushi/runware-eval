@@ -11,10 +11,10 @@ import numpy as np
 from PIL import Image
 from skimage.color import deltaE_ciede2000, rgb2lab
 
-from . import _labeling
+from . import _labeling, catalog
 from ._assets import CSS, FONTS
 from .bench import stem
-from .score import Pair, erode, find_mask
+from .score import JUDGED, Pair, coverage, erode, find_mask, label as metric_label, metric_id
 
 e = html.escape
 HEAT_MAX = 10.0
@@ -132,6 +132,56 @@ def gate_rows(item):
     return out
 
 
+def place_recipes(b, scored, agg):
+    """Mean of every measurement per recipe, and each recipe's place on it (1 = best, ties share a place).
+
+    A measurement is placed when it has a better direction and every recipe has a value for it, so no
+    recipe gains from a measurement it skipped. Places are averaged inside a dimension, then across
+    dimensions: the dimensions are what the user chose, and each counts once however many measurements
+    it holds. Returns (columns, direction by key, placed keys)."""
+    reg = catalog.load(b)
+    direction = {}
+    for dim, spec in (b.get("evaluate") or {}).items():
+        for opt in spec.get("metrics", []):
+            meta = (reg.get(metric_id(opt)) or {}).get("meta", {})
+            direction[f"{dim}:{metric_label(opt)}"] = "higher" if opt["id"] in JUDGED else meta.get("direction", "")
+    cols, seen = [], {}
+    for s in scored:
+        for m in s["metrics"]:
+            k = f"{m['dimension']}:{m['label']}"
+            if k not in seen:
+                seen[k] = {}
+                cols.append({"key": k, "dimension": m["dimension"], "label": m["label"]})
+            v = (m.get("values") or {}).get("mean", (m.get("values") or {}).get("value")) if m["status"] == "ok" else None
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v):
+                seen[k].setdefault(s["recipe"], []).append(float(v))
+    placed = []
+    for a in agg.values():
+        a["means"], a["places"] = {}, {}
+    for c in cols:
+        k, by = c["key"], seen[c["key"]]
+        for r, vs in by.items():
+            agg[r]["means"][k] = float(np.mean(vs))
+        d = direction.get(k)
+        if d not in ("lower", "higher", "closer_to_zero") or any(r not in by for r in agg):
+            continue
+        cost = {r: (-m if d == "higher" else abs(m) if d == "closer_to_zero" else m)
+                for r, m in ((r, agg[r]["means"][k]) for r in agg)}
+        for r in agg:
+            ties = sum(1 for q in agg if np.isclose(cost[q], cost[r], rtol=1e-6, atol=1e-9))
+            better = sum(1 for q in agg if cost[q] < cost[r] and not np.isclose(cost[q], cost[r], rtol=1e-6, atol=1e-9))
+            agg[r]["places"][k] = 1 + better + (ties - 1) / 2
+        placed.append(k)
+    for a in agg.values():
+        by_dim = {}
+        for c in cols:
+            if c["key"] in placed:
+                by_dim.setdefault(c["dimension"], []).append(a["places"][c["key"]])
+        a["place_by_dim"] = {d: float(np.mean(v)) for d, v in by_dim.items()}
+        a["place"] = float(np.mean(list(a["place_by_dim"].values()))) if by_dim else None
+    return cols, direction, placed
+
+
 def metric_value(item, label_or_cost):
     if label_or_cost == "cost":
         return item.get("cost")
@@ -232,7 +282,12 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         a["cost"] = float(np.mean(a["costs"])) if a["costs"] else listed.get(rid)
         a["cost_src"] = "measured" if a["costs"] else "listed"
         a["latency"] = float(np.mean(a["lat"])) if a["lat"] else None
-    order = sorted(agg, key=lambda r: (agg[r]["fails"], agg[r]["cost"] if agg[r]["cost"] is not None else 9))
+    # Standings: failed checks first, then average place on the measurements, then cost. Limits and
+    # places both always count; a bench without limits is ordered by place alone.
+    cols, direction, placed = place_recipes(b, scored, agg)
+    any_checks = any(a["checks"] for a in agg.values())
+    order = sorted(agg, key=lambda r: (agg[r]["fails"], agg[r]["place"] if agg[r]["place"] is not None else 1e9,
+                                       agg[r]["cost"] if agg[r]["cost"] is not None else 9))
     passing = [r for r in order if agg[r]["fails"] == 0 and agg[r]["checks"] > 0]
     measured = sum(sum(a["costs"]) for a in agg.values())
     not_run = sorted({m["label"] for s in scored for m in s["metrics"] if m["status"] != "ok"})
@@ -309,14 +364,19 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     best = order[0]
     cheapest_pass = min(passing, key=lambda r: agg[r]["cost"] or 9) if passing else None
     # headline: the recommendation, then what it costs and how many checks it passes.
-    # `best` is the first in `order`: fewest failed checks, then cheapest (so the cheapest passing one, if any)
+    # `best` is the first in `order`: fewest failed checks, then best average place, then cheapest
     ab = agg[best]
     price = f" at <em>${ab['cost']:.3f}</em> per output" if ab["cost"] is not None else ""
     missed = [k.split(":", 1)[1] for k, v in ab["verdict"].items() if not v]
     # Three things are kept apart in this report: measured values (the same for everyone), the verdict
     # against this bench's thresholds (a judgement for this brief), and the user's own ranking from the
     # labeling page (their preference). The headline names the second; "Your pick" names the third.
-    if passing:
+    place_txt = (f"average place {ab['place']:.1f} across the measurements (1.0 = best on all of them)"
+                 if ab["place"] is not None else "")
+    if not any_checks:
+        headline = (f"Best on this brief's measurements: <em>{e(best)}</em>"
+                    + (f", {place_txt}" if place_txt else "") + f"{price}. No pass/fail limits are set.")
+    elif passing:
         headline = f"Best against this brief's checks: <em>{e(best)}</em>. Passes every check{price}."
     else:
         headline = (f"Best against this brief's checks: <em>{e(best)}</em>. Passes {ab['checks'] - ab['fails']} "
@@ -342,11 +402,20 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         c = agg[cheapest_pass]
         second = card("Cheapest that passes", f"${c['cost']:.3f}" if c["cost"] is not None else "—",
                       f"{e(cheapest_pass)} · {e(recipes.get(cheapest_pass, {}).get('model', ''))} · {c['cost_src']}")
-    else:
+    elif any_checks:
         second = card("Best still misses", ab["fails"], e(", ".join(missed)))
+    elif len(order) > 1 and agg[order[1]]["place"] is not None:
+        second = card("Runner-up", f"avg place {agg[order[1]]['place']:.1f}",
+                      f"{e(order[1])} · {e(recipes.get(order[1], {}).get('model', ''))}")
+    else:
+        second = ""
     out.append("<section aria-label='Summary'><div class='cards'>"
-               + card("Best against the checks", f"{ab['checks'] - ab['fails']}/{ab['checks']} checks",
-                      f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))}", lit=True)
+               + (card("Best against the checks", f"{ab['checks'] - ab['fails']}/{ab['checks']} checks",
+                       f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))}"
+                       + (f" · {place_txt}" if place_txt else ""), lit=True) if any_checks else
+                  card("Best on the measurements", f"avg place {ab['place']:.1f}" if ab["place"] is not None else "—",
+                       f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))} · 1st of {len(agg)} recipes: average "
+                       f"of its places on {len(placed)} measurements", lit=True))
                + second
                + "<div class='card lit' id='pick-card' hidden><span class='lab'>Your pick (blind pairs)</span>"
                  "<span class='big' id='pick-big'></span><span class='strip' id='pick-foot'></span></div>"
@@ -408,51 +477,83 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             xname = "Cost per image (USD) →" if xlab == "cost" else f"{xlab} →"
             out.append("<section>" + sec_head(
                 ("Cost" if xlab == "cost" else e(xlab)) + f" vs {e(ylab)}",
-                "Mean across inputs. Dashed: pass thresholds. Filled: passes every check.")
+                "Mean across inputs. Dashed: pass limits. Filled: no failed check.")
                        + scatter(pts, xname, f"{ylab} ↓ better" if (gate_of(scored, ylab) or (0, 'max'))[1] == "max"
                                  else f"{ylab} ↑ better", gate_of(scored, xlab) if xlab != "cost" else None,
                                  gate_of(scored, ylab)) + "</section>")
 
-    # gate matrix (aggregated: worst case across inputs and seeds)
-    cols = []
-    for s in scored:
-        for g in gate_rows(s):
-            if g["key"] not in [c["key"] for c in cols]:
-                cols.append(g)
+    # what the brief asks, and what measures it
+    cov, _ = coverage(b)
+    if cov:
+        chip = {"limit": "<span class='chip ok'>measured, with a limit</span>",
+                "measured": "<span class='chip na'>measured, no limit</span>",
+                "none": "<span class='chip bad'>not measured</span>"}
+        holes = sum(1 for r in cov if r["status"] != "limit")
+        out.append("<section>" + sec_head(
+            "What the brief asks",
+            "Each requirement of the brief and the checks that answer it. "
+            + (f"<strong>{holes} of {len(cov)} cannot fail a recipe</strong>: the standings do not reflect "
+               "them fully, so judge those by eye." if holes else "Every requirement has a check with a limit."))
+            + "<div class='tablewrap'><table><thead><tr><th>Requirement</th><th>Measured by</th><th></th></tr></thead><tbody>"
+            + "".join(f"<tr><td>{e(r['need'])}</td><td>"
+                      + (e(", ".join(c["label"] + ("" if c["known"] else " (missing)") for c in r["checks"])) or "—")
+                      + f"</td><td>{chip[r['status']]}</td></tr>" for r in cov)
+            + "</tbody></table></div></section>")
+
+    # standings: every measurement, with its verdict where a limit is set
+    rule_txt = {"majority": "most seeds", "all": "every seed", "any": "at least one seed"}.get(rule, rule)
     groups = []
     for c in cols:
         if not groups or groups[-1][0] != c["dimension"]:
             groups.append([c["dimension"], 0])
         groups[-1][1] += 1
-    rule_txt = {"majority": "most seeds", "all": "every seed", "any": "at least one seed"}.get(rule, rule)
+    arrow = {"lower": " ↓", "higher": " ↑", "closer_to_zero": " →0"}
+    unplaced = [c["label"] for c in cols if c["key"] not in placed]
     out.append("<section>" + sec_head(
-               "Checks by recipe",
-               f"The verdict: measured values against the thresholds in <span class='mono'>bench.yaml</span>, "
-               f"which are this brief's judgement and can be changed. "
-               f"Pass = passes on {rule_txt} of every input (<span class='mono'>pass_rule: {e(rule)}</span>). "
-               "Cells: outputs passed / total. Sorted by failed checks, then cost.")
-               + "<div class='tablewrap'><table><thead><tr><th></th><th></th>"
+               "Standings",
+               "Every measurement counts. Recipes are sorted by <strong>failed checks</strong> (a measurement with a "
+               "limit in <span class='mono'>bench.yaml</span>: this brief's judgement, which can be changed), then by "
+               "<strong>average place</strong> (place 1 = best on a measurement; places are averaged inside each "
+               "dimension, then across dimensions, so a dimension counts once however many measurements it has), "
+               "then by cost. "
+               + (f"A check passes when it passes on {rule_txt} of every input (<span class='mono'>pass_rule: {e(rule)}"
+                  "</span>). " if any_checks else "This bench sets no limits, so nothing passes or fails here. ")
+               + "Cells: mean over inputs and seeds; ↑ higher is better, ↓ lower is better; bold = best in the column."
+               + (f" Not placed (not measured for every recipe, or no better direction): {e(', '.join(unplaced))}."
+                  if unplaced else ""))
+               + "<div class='tablewrap'><table><thead><tr><th></th><th></th><th></th><th></th>"
                + "".join(f"<th class='grp' colspan='{n}'>{e(d.replace('_', ' '))}</th>" for d, n in groups)
-               + "<th></th><th></th></tr><tr><th>#</th><th>Recipe</th>"
-               + "".join(f"<th>{e(c['label'])}</th>" for c in cols) + "<th>$/output</th><th>Time</th></tr></thead><tbody>")
+               + "<th></th><th></th></tr><tr><th>#</th><th>Recipe</th><th>Failed</th><th title='Average of this recipe&#39;s places on the measurements; 1.0 = best on all of them'>Average place</th>"
+               + "".join(f"<th>{e(c['label'])}{arrow.get(direction.get(c['key']), '')}</th>" for c in cols)
+               + "<th>$/output</th><th>Time</th></tr></thead><tbody>")
     for n, rid in enumerate(order, 1):
         a, cells = agg[rid], []
         for c in cols:
-            vals = [g for it in a["items"] for g in gate_rows(it) if g["key"] == c["key"]]
-            ok = [g["pass"] for g in vals if g["pass"] is not None]
-            if not ok:
+            k = c["key"]
+            mean = a["means"].get(k)
+            if mean is None:
                 cells.append("<td><span class='chip na'>not run</span></td>")
                 continue
-            v = a["verdict"].get(c["key"], all(ok))
-            shown = (f"{sum(ok)}/{len(ok)}" if len(ok) > 1
-                     else next((g for g in vals if g["pass"] is not None), vals[0])["value"])
-            cells.append(f"<td><span class='chip {'ok' if v else 'bad'}' title='passed on {sum(ok)} of {len(ok)} "
-                         f"outputs (inputs x seeds)'>{'✓' if v else '✕'} <span class='mono'>{e(str(shown))}"
-                         f"</span></span></td>")
+            lead = k in placed and a["places"][k] == min(agg[r]["places"][k] for r in agg)
+            val = f"<span class='mono'{' style=\'font-weight:700\'' if lead else ''}>{fmtv(mean)}</span>"
+            if k in a["verdict"]:
+                ok = [p for by_in in a["by_check"][k].values() for p in by_in]
+                v = a["verdict"][k]
+                cells.append(f"<td><span class='chip {'ok' if v else 'bad'}' title='passed on {sum(ok)} of {len(ok)} "
+                             f"outputs (inputs x seeds)'>{'✓' if v else '✕'} {val}"
+                             + (f" <span class='mono'>· {sum(ok)}/{len(ok)}</span>" if len(ok) > 1 else "")
+                             + "</span></td>")
+            else:
+                title = f" title='place {a['places'][k]:g} of {len(agg)}'" if k in placed else ""
+                cells.append(f"<td{title}>{val}</td>")
         cost = f"${a['cost']:.4f}" + ("" if a["cost_src"] == "measured" else "*") if a["cost"] is not None else "—"
         lat = f"{a['latency']:.0f}s" if a["latency"] else "—"
+        failed = f"{a['fails']} of {a['checks']}" if a["checks"] else "—"
+        by_dim = " · ".join(f"{d.replace('_', ' ')} {p:.1f}" for d, p in a["place_by_dim"].items())
+        place = f"<span title='{e(by_dim)}'>{a['place']:.1f}</span>" if a["place"] is not None else "—"
         out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' class='linkish'>{e(rid)}</button><div class='strip'>"
-                   f"{e(recipes.get(rid, {}).get('model', ''))} · {e(recipes.get(rid, {}).get('_fp', '') or '')[:8]}</div></td>{''.join(cells)}"
+                   f"{e(recipes.get(rid, {}).get('model', ''))} · {e(recipes.get(rid, {}).get('_fp', '') or '')[:8]}</div></td>"
+                   f"<td class='mono'>{failed}</td><td class='mono'>{place}</td>{''.join(cells)}"
                    f"<td class='mono'>{cost}</td><td class='mono'>{lat}</td></tr>")
     out.append("</tbody></table></div><p class='muted' style='font-size:12px'>* listed price, not measured.</p></section>")
 
@@ -530,7 +631,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "<code>runware-eval run bench.yaml</code></section>")
 
     payload = {"inputs": in_order, "order": order, "originals": originals, "cal": cal_data, "lab": lab_data, "best": best,
-               "recipes": {r: {"checks": a["checks"], "fails": a["fails"], "cost": a["cost"],
+               "recipes": {r: {"checks": a["checks"], "fails": a["fails"], "cost": a["cost"], "place": a["place"],
                                "model": recipes.get(r, {}).get("model", "")} for r, a in agg.items()},
                "items": {k: {kk: vv for kk, vv in v.items() if kk not in ("thumb", "_rank", "strip")} for k, v in items.items()}}
     out.append(f"<div class='tip' role='tooltip'></div><script type='application/json' id='data'>{json.dumps(payload)}"

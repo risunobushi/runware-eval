@@ -23,6 +23,16 @@ def setup(a):
     return b, out
 
 
+def brief_coverage(b):
+    """Say, before anything is paid, which parts of the brief no check covers."""
+    _, warn = score.coverage(b)
+    if warn:
+        print("Brief coverage:")
+        for w in warn:
+            print("  ! " + w)
+        print()
+
+
 def cmd_estimate(a):
     b, out = setup(a)
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
@@ -38,6 +48,7 @@ def cmd_estimate(a):
     for r in rows:
         x = by.setdefault(r["recipe"], {"n": 0, "cost": r["est_cost"], "src": r["est_source"]})
         x["n"] += 1
+    brief_coverage(b)
     print(f"{'recipe':34} {'tasks':>5} {'$/task':>9}  source")
     for rid, x in by.items():
         c = f"{x['cost']:.4f}" if x["cost"] is not None else "?"
@@ -54,6 +65,7 @@ def cmd_run(a):
     cap = (b.get("budget") or {}).get("max_usd")
     if cap is None:
         sys.exit("bench.yaml has no budget.max_usd: set a cap before running.")
+    brief_coverage(b)
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
     run.ensure_input_masks(b, out)
     run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
