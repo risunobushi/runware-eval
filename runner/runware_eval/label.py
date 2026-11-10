@@ -10,21 +10,23 @@ import random
 
 from PIL import Image
 
-from ._assets import CSS
-from .report import uri
+from ._assets import CSS, FONTS
+from .report import e, uri
 from .bench import stem
 
 PAGE_CSS = """
 .task{display:grid;gap:14px}.row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
-.row figure{margin:0;display:grid;gap:4px}.row img{width:100%;height:auto;max-height:58vh;object-fit:contain;background:var(--card);border-radius:8px;border:1px solid var(--grid)}
+.row figure{margin:0;display:grid;gap:4px}.row img{width:100%;height:auto;max-height:58vh;object-fit:contain;background:var(--deep);border-radius:var(--r);border:1px solid var(--grid)}
 .btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.btns button{font:inherit;font-size:14px;padding:8px 14px;
-border-radius:8px;border:1px solid var(--grid);background:var(--card);color:var(--ink);cursor:pointer}
-.btns button.on{border-color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent)}
-.progress{font-size:13px;color:var(--ink2)}.kbd{font-family:ui-monospace,monospace;font-size:12px;
+border-radius:var(--r);border:1px solid var(--grid);background:var(--card);color:var(--ink);cursor:pointer}
+.btns button:hover,.tabs button:hover{border-color:var(--axis)}
+.btns button.on{border-color:var(--green);background:rgba(175,255,159,.1);color:var(--green)}
+#save{background:var(--green);color:var(--deep);border-color:var(--green);font-weight:600}
+.progress{font:12.5px var(--mono);color:var(--ink2)}.kbd{font-family:var(--mono);font-size:12px;
 border:1px solid var(--grid);border-radius:4px;padding:0 5px}
-.tabs{display:flex;gap:6px}.tabs button{font:inherit;padding:6px 12px;border-radius:7px;border:1px solid var(--grid);
-background:var(--card);color:var(--ink);cursor:pointer}.tabs button[aria-pressed=true]{border-color:var(--accent);
-box-shadow:inset 0 -2px 0 var(--accent)}
+.tabs{display:flex;gap:6px}.tabs button{font:inherit;padding:8px 14px;border-radius:var(--r);border:1px solid var(--grid);
+background:var(--card);color:var(--ink);cursor:pointer}.tabs button[aria-pressed=true]{border-color:var(--green);
+background:rgba(175,255,159,.08)}
 """
 
 JS = """
@@ -96,10 +98,9 @@ def build(b, out_dir, pairs_per_recipe=4, seed=7, px=640):
                "items": [{k: v for k, v in it.items() if k != "img"} for it in items],
                "img": img, "originals": originals, "pairs": pairs}
     html = (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
-            f"content='width=device-width,initial-scale=1'><title>Label outputs</title><style>{CSS}{PAGE_CSS}</style>"
-            f"</head><body><div class='wrap'><header style='display:grid;gap:10px'><h1>Label the outputs</h1>"
-            f"<p class='ink2'>Blind: model names are hidden and the order is shuffled. Judge each output against "
-            f"your own idea of good for this goal. You don't need to finish; label what you can, then save.</p>"
+            f"content='width=device-width,initial-scale=1'><title>Label outputs</title>{FONTS}<style>{CSS}{PAGE_CSS}</style>"
+            f"</head><body><div class='wrap'><header class='hero'><div class='kicker'><b>runware-eval</b> · blind labeling · {e(payload['bench'])}</div>"
+            f"<h1>Label the outputs</h1><p class='goal'>Model names hidden, order shuffled. Label what you can, then download.</p>"
             f"<div class='tabs'><button data-tab='label'>1 · Good or bad</button>"
             f"<button data-tab='pair'>2 · Which is better ({len(pairs)} pairs)</button>"
             f"<button id='save' style='margin-left:auto'>Download labels.json</button></div></header>"
@@ -111,7 +112,7 @@ def build(b, out_dir, pairs_per_recipe=4, seed=7, px=640):
             f"<button data-nav='-1'>← back</button><button data-nav='1'>skip →</button>"
             f"<span class='progress' id='l-prog'></span></div></section>"
             f"<section id='t-pair' class='task' hidden><figure style='margin:0;max-width:300px'><img id='p-orig' "
-            f"alt='Original' style='width:100%;border-radius:8px'><figcaption>original</figcaption></figure>"
+            f"alt='Original' style='width:100%;border-radius:var(--r)'><figcaption>original</figcaption></figure>"
             f"<div class='row'><figure><img id='p-a' alt='Option A'><figcaption>A</figcaption></figure>"
             f"<figure><img id='p-b' alt='Option B'><figcaption>B</figcaption></figure></div><div class='btns'>"
             f"<button data-win='a'>A is better <span class='kbd'>←</span></button>"

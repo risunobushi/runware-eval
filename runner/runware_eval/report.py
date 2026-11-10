@@ -11,14 +11,15 @@ import numpy as np
 from PIL import Image
 from skimage.color import deltaE_ciede2000, rgb2lab
 
-from ._assets import CSS
+from ._assets import CSS, FONTS
 from .bench import stem
 from .score import Pair, erode, find_mask
 
 e = html.escape
 HEAT_MAX = 10.0
-RAMP = np.array([[0xcd, 0xe2, 0xfb], [0x86, 0xb6, 0xef], [0x2a, 0x78, 0xd6], [0x1c, 0x5c, 0xab],
-                 [0x0d, 0x36, 0x6b]]) / 255.0
+# Runware greens to yellow, dark to light: brighter = more colour change (matches .legend-bar in _assets)
+RAMP = np.array([[0x1f, 0x3a, 0x1b], [0x34, 0x5c, 0x2d], [0x6f, 0xbf, 0x5f], [0xaf, 0xff, 0x9f],
+                 [0xff, 0xff, 0x7d]]) / 255.0
 
 JS = """
 const D = JSON.parse(document.getElementById('data').textContent);
@@ -91,7 +92,7 @@ def heatmap(p, opt):
     if opt.get("ignore_lightness"):
         b[..., 0] = p.lab_in[..., 0]
     de = deltaE_ciede2000(p.lab_in, b)
-    out = 0.82 + 0.18 * np.repeat(p.rgb_out.mean(axis=2, keepdims=True), 3, axis=2)
+    out = 0.06 + 0.30 * np.repeat(p.rgb_out.mean(axis=2, keepdims=True), 3, axis=2)  # dim grey under the ramp
     out[sel] = ramp(de[sel] / HEAT_MAX)
     return out
 
@@ -151,7 +152,7 @@ def scatter(points, xlab, ylab, xgate=None, ygate=None):
         zy0, zy1 = (sy(ygate[0]), sy(y0)) if ygate[1] == "max" else (mt, sy(ygate[0]))
         p.append(f'<rect x="{zx0:.1f}" y="{zy0:.1f}" width="{zx1 - zx0:.1f}" height="{zy1 - zy0:.1f}" class="zone"/>')
         p.append(f'<text x="{(zx1 - 6) if xgate[1] == "min" else (zx0 + 6):.1f}" y="{zy1 - 8:.1f}" class="zone-label" '
-                 f'text-anchor="{"end" if xgate[1] == "min" else "start"}">Passes both</text>')
+                 f'text-anchor="{"end" if xgate[1] == "min" else "start"}">PASSES BOTH</text>')
     for t in np.linspace(y0, y1, 5):
         p.append(f'<line x1="{ml}" x2="{W - mr}" y1="{sy(t):.1f}" y2="{sy(t):.1f}" class="grid"/>'
                  f'<text x="{ml - 8}" y="{sy(t) + 4:.1f}" class="tick" text-anchor="end">{fmtv(float(t))}</text>')
@@ -179,7 +180,7 @@ def scatter(points, xlab, ylab, xgate=None, ygate=None):
                 break
         tipt = f"{name} · {xlab.split(' (')[0]} {fmtv(x)} · {ylab.split(' (')[0]} {fmtv(y)} · {fails} failed check(s)"
         p.append(f'<g class="pt" data-tip="{e(tipt)}"><circle cx="{cx:.1f}" cy="{cy:.1f}" r="12" class="hit"/>'
-                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" class="dot"/><text x="{cx + dx:.1f}" y="{cy + dy:.1f}" '
+                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" class="dot{" fail" if fails else ""}"/><text x="{cx + dx:.1f}" y="{cy + dy:.1f}" '
                  f'text-anchor="{anchor}" class="lbl">{e(name)}</text></g>')
     p.append("</svg>")
     return "<div class='chartwrap'>" + "".join(p) + "</div>"
@@ -252,7 +253,13 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         else:
             f = os.path.join(out_dir, s["file"])
             p = Pair(b, inputs[s["input"]], f, find_mask(out_dir, s["file"], s["recipe"]))
-        it = {"img": uri(p.rgb_out, 900), "thumb": uri(p.rgb_out, 360, 80), "gates": gate_rows(s)}
+        strip = [recipes.get(s["recipe"], {}).get("model", "")]
+        if s.get("latency_s") is not None:
+            strip.append(f"{s['latency_s']:.1f}s")
+        if s.get("cost") is not None:
+            strip.append(f"${s['cost']:.4f}")
+        it = {"img": uri(p.rgb_out, 900), "thumb": uri(p.rgb_out, 360, 80), "gates": gate_rows(s),
+              "strip": " · ".join(x for x in strip if x)}
         try:
             it["heat"] = uri(heatmap(p, first_de), 520)
         except KeyError:
@@ -266,45 +273,70 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         if key not in items or s["seed"] < items[key]["_seed"]:
             items[key] = {**it, "_seed": s["seed"]}
 
+    title = b.get("title") or "Which recipe works best?"
     out = [f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
-           f"content='width=device-width,initial-scale=1'><title>Bench report</title><style>{CSS}</style></head>"
+           f"content='width=device-width,initial-scale=1'><title>{e(title)}</title>{FONTS}<style>{CSS}</style></head>"
            f"<body><div class='wrap'>"]
     seeds = sorted({s["seed"] for s in scored})
-    out.append("<header style='display:grid;gap:12px'>"
-               f"<div class='muted mono' style='font-size:12px'>runware-eval · {date.today()}</div>"
-               f"<h1>{e(b.get('title', 'Which recipe works best?'))}</h1><p class='ink2'>{e(b['goal'].strip())}</p>"
-               f"<div class='meta'><span>{len(agg)} recipes</span><span>{len(in_order)} input(s)</span>"
-               f"<span>seed(s) {', '.join(map(str, seeds))}</span><span>{len(scored)} outputs scored</span>"
-               f"<span>Generation spend ${measured:.3f}</span>"
-               f"<span>Checks spend ${data.get('judge_cost', 0) + sum(r.get('eval_cost') or 0 for r in data.get('attempted_rows', [])):.3f}</span>"
-               f"<span>Judges: {e(', '.join(data.get('judges') or [])) or 'off'}</span>"
-               f"<span>Controls: {sum(c['ok'] for c in data.get('controls', []))}/{len(data.get('controls', []))} ok</span>"
-               "</div></header>")
     best = order[0]
     cheapest_pass = min(passing, key=lambda r: agg[r]["cost"] or 9) if passing else None
+    # headline: the count, then the number that decides
+    if cheapest_pass and agg[cheapest_pass]["cost"] is not None:
+        headline = (f"{len(passing)} of {len(agg)} recipes pass every check. "
+                    f"Cheapest: <em>${agg[cheapest_pass]['cost']:.3f}</em> per output.")
+    elif passing:
+        headline = f"{len(passing)} of {len(agg)} recipes pass every check."
+    else:
+        headline = (f"0 of {len(agg)} recipes pass every check. "
+                    f"Fewest failed checks: <em>{agg[best]['fails']}</em>.")
+    controls = data.get("controls", [])
+    checks_spend = data.get("judge_cost", 0) + sum(r.get("eval_cost") or 0 for r in data.get("attempted_rows", []))
+    out.append("<header class='hero'>"
+               f"<div class='kicker'><b>runware-eval</b> · bench report · {date.today()}</div>"
+               f"<h1>{headline}</h1><p class='goal'><strong>{e(title)}</strong> {e(b['goal'].strip())}</p>"
+               f"<div class='meta'><span>{len(agg)} recipes</span><span>{len(in_order)} input(s)</span>"
+               f"<span>seed {', '.join(map(str, seeds))}</span><span>{len(scored)} outputs</span>"
+               f"<span>generation ${measured:.3f}</span><span>checks ${checks_spend:.3f}</span>"
+               f"<span>judges {e(', '.join(data.get('judges') or [])) or 'off'}</span>"
+               f"<span>controls {sum(c['ok'] for c in controls)}/{len(controls)} ok</span>"
+               "</div></header>")
+
+    def card(label, big, foot, lit=False):
+        return (f"<div class='card{' lit' if lit else ''}'><span class='lab'>{label}</span>"
+                f"<span class='big'>{big}</span><span class='strip'>{foot}</span></div>")
+
+    if cheapest_pass:
+        c = agg[cheapest_pass]
+        second = card("Cheapest that passes", f"${c['cost']:.3f}" if c["cost"] is not None else "—",
+                      f"{e(cheapest_pass)} · {e(recipes.get(cheapest_pass, {}).get('model', ''))} · {c['cost_src']}")
+    else:
+        second = card("Fewest failed checks", agg[best]["fails"],
+                      f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))}")
     out.append("<section aria-label='Summary'><div class='cards'>"
-               f"<div class='card'><span class='lab'>Recipes passing every check</span><span class='big'>"
-               f"{len(passing)} / {len(agg)}</span><span class='lab'>{e(', '.join(passing)) or 'None yet'}</span></div>"
-               f"<div class='card'><span class='lab'>{'Cheapest that passes' if cheapest_pass else 'Closest'}</span>"
-               f"<span class='big' style='font-size:20px'>{e(cheapest_pass or best)}</span><span class='lab'>"
-               + (f"${agg[cheapest_pass]['cost']:.4f} per image ({agg[cheapest_pass]['cost_src']})" if cheapest_pass
-                  else f"{agg[best]['fails']} failed check(s) across all inputs") + "</span></div>"
-               f"<div class='card'><span class='lab'>Checks not run</span><span class='big'>{len(not_run)}</span>"
-               f"<span class='lab'>{e(', '.join(not_run)) or 'All ran'}</span></div>"
-               f"<div class='card'><span class='lab'>Failed tasks</span><span class='big'>{len(errors)}</span>"
-               f"<span class='lab'>{e(', '.join(sorted({x['recipe'] for x in errors}))) or 'None'}</span></div>"
-               "</div></section>")
+               + card("Pass every check", f"{len(passing)}/{len(agg)}", e(", ".join(passing)) or "none yet",
+                      lit=bool(passing))
+               + second
+               + card("Checks not run", len(not_run), e(", ".join(not_run)) or "all ran")
+               + card("Failed tasks", len(errors), e(", ".join(sorted({x["recipe"] for x in errors}))) or "none")
+               + "</div></section>")
+
+    sec_n = [0]
+
+    def sec_head(h2, intro=""):
+        sec_n[0] += 1
+        return (f"<div class='sec-head'><h2><span class='num'>{sec_n[0]:02d}</span>{h2}</h2>"
+                + (f"<p class='ink2'>{intro}</p>" if intro else "") + "</div>")
 
     bad_ctl = [c for c in data.get("controls", []) if not c["ok"]]
     if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl:
-        out.append("<section><h2>What this run says</h2><ul class='notes'>")
+        out.append("<section>" + sec_head("Findings") + "<ul class='notes'>")
         out += [f"<li>{n}</li>" for n in notes.get("findings", [])]
         out += [f"<li class='warn'>{n}</li>" for n in notes.get("caveats", [])]
         for c in bad_ctl:
             out.append(f"<li class='warn'><strong>Control failed:</strong> {e(c['label'])} on an unchanged copy of "
-                       f"{e(c['input'])} scored {fmtv(c['value'])} and {'failed' if c['expected_pass'] else 'passed'}; "
-                       f"it should have {'passed' if c['expected_pass'] else 'failed'}. The check or its threshold "
-                       f"is wrong for this bench; read its results with care.</li>")
+                       f"{e(c['input'])}: {fmtv(c['value'])}, {'failed' if c['expected_pass'] else 'passed'} "
+                       f"(expected {'pass' if c['expected_pass'] else 'fail'}). Check or threshold does not fit "
+                       f"this bench.</li>")
         for x in errors:
             out.append(f"<li class='warn'><strong>{e(x['recipe'])}</strong> on {e(x['input'])} failed: "
                        f"{e(str(x.get('error')))}</li>")
@@ -316,10 +348,11 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     cal_path = os.path.join(out_dir, "calibration.json")
     if os.path.exists(cal_path):
         cal = json.load(open(cal_path, encoding="utf8"))
-        out.append(f"<section><h2>Your judgement</h2><p class='ink2'>From the blind labeling page: "
-                   f"{cal['labeled']} outputs labeled ({cal['good']} good). Agreement is balanced: 50% is chance, "
-                   f"100% means the check always matched you. {'Few labels so far: read suggestions as hints. ' if cal.get('few_labels') else ''}Suggested thresholds are not applied until you "
-                   f"change <span class='mono'>bench.yaml</span>.</p>")
+        out.append("<section>" + sec_head(
+            "Checks vs your labels",
+            f"{cal['labeled']} outputs labeled blind ({cal['good']} good). Balanced agreement: 50% = chance. "
+            f"{'Few labels: treat suggestions as hints. ' if cal.get('few_labels') else ''}Suggestions are not "
+            f"applied to <span class='mono'>bench.yaml</span>."))
         if cal.get("gates"):
             out.append("<div class='tablewrap'><table><thead><tr><th>Check</th><th>Threshold</th><th>Agrees with you"
                        "</th><th>Suggested</th><th>Would agree</th></tr></thead><tbody>"
@@ -358,8 +391,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                 pts.append((rid, float(np.mean(xs)), float(np.mean(ys)), agg[rid]["fails"]))
         if pts:
             xname = "Cost per image (USD) →" if xlab == "cost" else f"{xlab} →"
-            out.append("<section><h2>The trade-off</h2><p class='ink2'>Averages across inputs. Dashed lines are the "
-                       "pass thresholds; the shaded area passes both. Hover a dot for values.</p>"
+            out.append("<section>" + sec_head(
+                ("Cost" if xlab == "cost" else e(xlab)) + f" vs {e(ylab)}",
+                "Mean across inputs. Dashed: pass thresholds. Filled: passes every check.")
                        + scatter(pts, xname, f"{ylab} ↓ better" if (gate_of(scored, ylab) or (0, 'max'))[1] == "max"
                                  else f"{ylab} ↑ better", gate_of(scored, xlab) if xlab != "cost" else None,
                                  gate_of(scored, ylab)) + "</section>")
@@ -376,11 +410,11 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             groups.append([c["dimension"], 0])
         groups[-1][1] += 1
     rule_txt = {"majority": "most seeds", "all": "every seed", "any": "at least one seed"}.get(rule, rule)
-    out.append("<section><h2>Check by check</h2><p class='ink2'>A check passes when it passes on "
-               f"{rule_txt} of every input (<span class='mono'>pass_rule: {e(rule)}</span>); cells show how many "
-               "outputs passed. Ranked by failed checks, then cost. Thresholds come from "
-               "<span class='mono'>bench.yaml</span>.</p>"
-               "<div class='tablewrap'><table><thead><tr><th></th><th></th>"
+    out.append("<section>" + sec_head(
+               "Checks by recipe",
+               f"Pass = passes on {rule_txt} of every input (<span class='mono'>pass_rule: {e(rule)}</span>). "
+               "Cells: outputs passed / total. Sorted by failed checks, then cost.")
+               + "<div class='tablewrap'><table><thead><tr><th></th><th></th>"
                + "".join(f"<th class='grp' colspan='{n}'>{e(d.replace('_', ' '))}</th>" for d, n in groups)
                + "<th></th><th></th></tr><tr><th>#</th><th>Recipe</th>"
                + "".join(f"<th>{e(c['label'])}</th>" for c in cols) + "<th>$/image</th><th>Time</th></tr></thead><tbody>")
@@ -400,15 +434,14 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                          f"</span></span></td>")
         cost = f"${a['cost']:.4f}" + ("" if a["cost_src"] == "measured" else "*") if a["cost"] is not None else "—"
         lat = f"{a['latency']:.0f}s" if a["latency"] else "—"
-        out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' style='all:unset;cursor:pointer;"
-                   f"font-weight:600'>{e(rid)}</button><div class='muted mono' style='font-size:11px'>"
+        out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' class='linkish'>{e(rid)}</button><div class='strip'>"
                    f"{e(recipes.get(rid, {}).get('model', ''))} · {e(recipes.get(rid, {}).get('_fp', '') or '')[:8]}</div></td>{''.join(cells)}"
                    f"<td class='mono'>{cost}</td><td class='mono'>{lat}</td></tr>")
-    out.append("</tbody></table></div><p class='muted' style='font-size:12px'>* listed price (no measured cost for this recipe yet).</p></section>")
+    out.append("</tbody></table></div><p class='muted' style='font-size:12px'>* listed price, not measured.</p></section>")
 
     # comparison viewer
     crop_name = next((o.get("crop_name") for o in originals.values() if o.get("crop_name")), None)
-    out.append("<section id='compare'><h2>Compare with the original</h2>")
+    out.append("<section id='compare'>" + sec_head("Output vs original"))
     if len(in_order) > 1:
         out.append("<div class='picker' role='group' aria-label='Input'>" + "".join(
             f"<button data-in='{e(k)}' aria-pressed='false'>{e(k)}</button>" for k in in_order) + "</div>")
@@ -418,7 +451,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         "<div class='ba' aria-label='Drag to compare original and output'><img class='before' alt='Original'>"
         "<div class='after'><img alt='Output'></div><div class='bar'></div><div class='knob'>⇆</div>"
         "<span class='tag l'>original</span><span class='tag r'></span></div><span class='muted' "
-        "style='font-size:12px'>Drag the handle, or focus it and use ← →.</span></div><div class='side'>"
+        "style='font-size:12px'>Drag, or use ← → when focused.</span></div><div class='side'>"
         "<div class='panel'><h3>Where the colour changed</h3><img id='heat' alt='Colour drift heatmap'>"
         "<div class='legend-bar'></div><div class='legend-ticks'><span>0 ΔE (unchanged)</span><span>"
         f"{HEAT_MAX / 2:.0f}</span><span>{HEAT_MAX:.0f}+ ΔE</span></div><p class='muted' style='font-size:12px'>"
@@ -433,7 +466,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     out.append("<div class='panel'><h3>Checks</h3><dl class='kv' id='kv'></dl></div></div></div></section>")
 
     # gallery
-    out.append("<section><h2>All outputs</h2>")
+    out.append("<section>" + sec_head("Outputs", "First seed per recipe: model · time · cost. Click to compare."))
     for k in in_order:
         if len(in_order) > 1:
             out.append(f"<h3 class='ink2'>{e(k)}</h3>")
@@ -444,8 +477,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                 continue
             f = sum(1 for g in it["gates"] if g["pass"] is False)
             out.append(f"<figure data-id='{e(rid)}' data-in='{e(k)}'><img src='{it['thumb']}' alt='{e(rid)}'>"
-                       f"<figcaption><span style='font-size:12px'>{e(rid)}</span><span class='chip "
-                       f"{'ok' if f == 0 else 'bad'}'>{'✓ all' if f == 0 else str(f) + ' ✕'}</span></figcaption></figure>")
+                       f"<figcaption><span class='row1'><span>{e(rid)}</span><span class='chip "
+                       f"{'ok' if f == 0 else 'bad'}'>{'✓ all' if f == 0 else str(f) + ' ✕'}</span></span>"
+                       f"<span class='strip'>{e(it['strip'])}</span></figcaption></figure>")
         out.append("</div>")
     out.append("</section>")
 
@@ -455,7 +489,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         for m in s["metrics"]:
             if m["label"] not in labels:
                 labels.append(m["label"])
-    out.append("<section><h2>All measurements</h2><details><summary>Open the full table</summary><div class='tablewrap' "
+    out.append("<section>" + sec_head("All measurements") + "<details><summary>Show table</summary><div class='tablewrap' "
                "style='margin-top:12px'><table><thead><tr><th>Input</th><th>Recipe</th><th>Seed</th><th>Native</th>"
                "<th>Cost</th><th>Time</th>" + "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")
     for s in sorted(scored, key=lambda s: (s["input"], order.index(s["recipe"]), s["seed"])):
@@ -467,8 +501,12 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                    f"{fmtv(s.get('latency_s'))}</td>{cells}</tr>")
     out.append("</tbody></table></div></details></section>")
 
+    out.append("<section class='cta'><div style='display:grid;gap:8px'><h2>Re-run</h2><p class='ink2'>Add a "
+               "recipe file and run again. Outputs already measured are reused by fingerprint.</p></div>"
+               "<code>runware-eval run bench.yaml</code></section>")
+
     payload = {"inputs": in_order, "order": order, "originals": originals,
-               "items": {k: {kk: vv for kk, vv in v.items() if kk not in ("thumb", "_seed")} for k, v in items.items()}}
+               "items": {k: {kk: vv for kk, vv in v.items() if kk not in ("thumb", "_seed", "strip")} for k, v in items.items()}}
     out.append(f"<div class='tip' role='tooltip'></div><script type='application/json' id='data'>{json.dumps(payload)}"
                f"</script><script>{JS}</script></div></body></html>")
     out_path = out_path or os.path.join(out_dir, "report.html")
