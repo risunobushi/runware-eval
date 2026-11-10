@@ -1,7 +1,7 @@
 """Metric catalogue: the curated library plus a bench's own and shared metric folders.
 
 Same principle as recipes: one file per metric, fingerprinted. Resolution order (first wins):
-the bench's `metric_dirs` in the order listed (default `metrics/` next to bench.yaml), then the
+the bench's `metricDirs` in the order listed (default `metrics/` next to bench.yaml), then the
 library shipped with the runner. A bench metric with a library id overrides it.
 
 Metric files are code. They are only loaded from local folders, never from a URL; review a shared
@@ -35,7 +35,7 @@ def _load(path, source):
 def dirs(b=None):
     out = []
     if b is not None:
-        for d in b.get("metric_dirs") or ["metrics"]:
+        for d in b.get("metricDirs") or b.get("metric_dirs") or ["metrics"]:
             out.append((os.path.join(b["_dir"], d), "bench" if d == "metrics" else f"shared:{d}"))
     out.append((LIBRARY, "library"))
     return out

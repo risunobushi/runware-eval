@@ -14,12 +14,19 @@ import re
 
 import yaml
 
-FP_KEYS = ("taskType", "model", "params", "size", "mask", "then", "post")
+FP_KEYS = ("taskType", "model", "params", "size", "mask", "then", "post", "routing")
 FP_LINE = re.compile(r"^fingerprint:.*$", re.M)
 
 
 def fingerprint(r):
+    """Hashed over the older spelling of `size` and `post` keys, so a recipe keeps its fingerprint (and
+    its past results) whether its file says `max_mp` or `maxMp`."""
+    from .bench import RECIPE_POST, RECIPE_SIZE, rename_keys
     core = {k: r[k] for k in FP_KEYS if k in r}
+    if isinstance(core.get("size"), dict):
+        core["size"] = rename_keys(core["size"], {new: old for old, new in RECIPE_SIZE.items()})
+    if isinstance(core.get("post"), list):
+        core["post"] = [rename_keys(s, {new: old for old, new in RECIPE_POST.items()}) for s in core["post"]]
     core.setdefault("taskType", "imageInference")
     return hashlib.sha256(json.dumps(core, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
@@ -32,11 +39,12 @@ def slots(r):
 
 
 def dirs(b):
-    return [os.path.join(b["_dir"], d) for d in (b.get("recipe_dirs") or ["recipes"])]
+    return [os.path.join(b["_dir"], d) for d in (b.get("recipeDirs") or b.get("recipe_dirs") or ["recipes"])]
 
 
 def load_file(path):
-    r = yaml.safe_load(open(path, encoding="utf8"))
+    from .bench import modern_recipe
+    r = modern_recipe(yaml.safe_load(open(path, encoding="utf8")))
     r["_file"] = path
     fp = fingerprint(r)
     if r.get("fingerprint") != fp:
@@ -76,7 +84,8 @@ def resolve_bench(b):
                     raise ValueError(f"Recipe '{x}' not found in {', '.join(dirs(b))}")
                 chosen.append(cat[x])
             else:
-                chosen.append({**x, "_fp": fingerprint(x)})
+                from .bench import modern_recipe
+                chosen.append({**modern_recipe(x), "_fp": fingerprint(x)})
     media = {k for k, v in b.items() if isinstance(v, dict) and "path" in v}
     builtin = {"input", "seed", "mask", "judges", "prev"}
     for r in chosen:

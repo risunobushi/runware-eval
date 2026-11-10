@@ -53,8 +53,13 @@ try:
     run.execute([job(0, "nop")], tempfile.mkdtemp(), max_usd=1, log=lambda *a: None)
     check("unknown price stops the run", False)
 except SystemExit as e:
-    check("unknown price stops the run", "price_usd" in str(e))
-check("price_usd is read from the recipe", api.recipe_price({"price_usd": 0.4, "notes": "saves $9", "model": "x"}) == 0.4)
+    check("unknown price stops the run", "`price:" in str(e))
+check("price is read from the recipe", api.recipe_price({"price": 0.4, "notes": "saves $9", "model": "x"}) == 0.4)
+check("price_usd, the older spelling, still works", api.recipe_price({"price_usd": 0.4, "notes": "saves $9", "model": "x"}) == 0.4)
+from runware_eval import bench as _bench
+check("budget.maxPrice is the run's cap", _bench.max_price({"budget": {"maxPrice": 3}}) == 3)
+check("budget.max_usd, the older spelling, still works", _bench.max_price({"budget": {"max_usd": 2}}) == 2)
+check("no budget, no cap", _bench.max_price({}) is None)
 run.estimate = lambda jobs, results: [{**j, "est_cost": 0.02, "est_source": "test"} for j in jobs]
 
 # 3. interrupted run: the task was sent, the process died before the result was saved

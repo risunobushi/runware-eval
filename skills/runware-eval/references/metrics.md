@@ -113,7 +113,7 @@ make suggested thresholds dependable.
 
 ## The judge funnel
 
-Judges see only outputs that fail at most `judge_when.max_failed_checks` pixel checks (default 1),
+Judges see only outputs that fail at most `judgeWhen.maxFailedChecks` pixel checks (default 1),
 and every `vlm_*` question for one output goes into ONE call per judge. Ask judges only what no pixel
 check covers (reference leakage, "reads as a real photo", same product overall, aesthetics). On the
 bag, 1 of 18 outputs reached the judges: $0.006 instead of $0.88.

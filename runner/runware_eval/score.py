@@ -99,13 +99,13 @@ class Pair:
 
 # ---------- metrics ----------
 # Implementations live in one file each: the curated library (runware_eval/metrics_lib/) plus a
-# bench's own metrics/ folder and any shared metric_dirs. See catalog.py and metric_api.py.
+# bench's own metrics/ folder and any shared metricDirs. See catalog.py and metric_api.py.
 
 
 def copied_regions(recipe):
     """Regions a recipe copies from the original in a post step: pixel similarity there is by construction."""
     return {list(s.values())[0] for s in (recipe or {}).get("post") or []
-            if any(k in s for k in ("restore", "transfer_detail"))}
+            if any(k in s for k in ("restore", "transferDetail", "transfer_detail"))}
 # ---------- gates ----------
 
 def check(vals, opt):
@@ -314,7 +314,8 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
         except judge_mod.api.RunwareError:
             panel.offline = True
             log("No Runware login: vision judges use cached answers only; new questions are skipped.")
-    max_failed = (b.get("judge_when") or {}).get("max_failed_checks", 1)
+    when = b.get("judgeWhen") or b.get("judge_when") or {}
+    max_failed = when.get("maxFailedChecks", when.get("max_failed_checks", 1))
     recipes_by_id = {r["id"]: r for r in b.get("recipes") or [] if isinstance(r, dict)}
     scored, pending = [], []
     for f in files:
@@ -379,6 +380,8 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
         entry = {"input": inp, "recipe": recipe, "seed": int(seed), "file": fname,
                  "native": f"{p.native[0]}x{p.native[1]}", "cost": r.get("cost"),
                  "latency_s": r.get("latency_s"), "metrics": metrics}
+        if r.get("picked_model"):
+            entry["picked_model"] = r["picked_model"]
         if view:
             stem_ = fname.rsplit(".", 1)[0]
             entry.update(view=f"renders/{stem_}__front.png", view_mask=f"renders/{stem_}__front_cut.png",

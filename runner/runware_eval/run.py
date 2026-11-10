@@ -254,16 +254,16 @@ def run_pipeline(j, b, out_dir, bases, lock_path, journal=None):
         row["steps"].append(f"then {then['model']}")
     pre_post_url = cur_url
     for step in r.get("post") or []:
-        if "transfer_detail" in step:
-            region = input_region(b, inp, step["transfer_detail"])
+        if "transferDetail" in step:
+            region = input_region(b, inp, step["transferDetail"])
             cur_path = transfer_detail(cur_path, os.path.join(b["_dir"], inp["path"]), region,
-                                       step.get("sigma_px", 6), step.get("feather_px", 6),
+                                       step.get("sigmaPx", 6), step.get("featherPx", 6),
                                        os.path.join(out_dir, "steps", stem_ + "__post.png"))
             cur_url = None
-            row["steps"].append(f"transfer detail {step['transfer_detail']}")
+            row["steps"].append(f"transfer detail {step['transferDetail']}")
         if "restore" in step:
             region = input_region(b, inp, step["restore"])
-            cur_path = restore(cur_path, os.path.join(b["_dir"], inp["path"]), region, step.get("feather_px", 4),
+            cur_path = restore(cur_path, os.path.join(b["_dir"], inp["path"]), region, step.get("featherPx", 4),
                                os.path.join(out_dir, "steps", stem_ + "__post.png"))
             cur_url = None
             row["steps"].append(f"restore {step['restore']}")
@@ -302,11 +302,12 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
     log(f"{len(jobs) - len(todo)} cached, {len(todo)} to run. Spent so far ${spent:.3f}, "
         f"projected ${projected:.3f}, cap ${max_usd:.2f}.")
     if unknown:
-        raise SystemExit(f"Stopped: no price known for {', '.join(sorted(set(unknown)))}. Add `price_usd: <per "
-                         "output>` to the recipe file (it does not change the fingerprint), so the cap can hold.")
+        raise SystemExit(f"Stopped: no price known for {', '.join(sorted(set(unknown)))}. Add `price: <USD per "
+                         "output>` to the recipe file (it does not change the fingerprint), so the cap can hold. "
+                         "For a `model: auto` recipe, `routing.maxPrice` does the same and also binds the router.")
     if spent + projected > max_usd:
         raise SystemExit(f"Stopped: ${spent + projected:.3f} would exceed the ${max_usd:.2f} cap. "
-                         "Raise budget.max_usd in bench.yaml or run fewer recipes.")
+                         "Raise budget.maxPrice in bench.yaml or run fewer recipes.")
     budget = Budget(max_usd, spent, measured={e["recipe"] for e in est if e["est_source"] == "measured"})
     journal = Journal(out_dir)
     est_by = {e["hash"]: e["est_cost"] for e in est}
@@ -335,6 +336,8 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
                    cost=res.get("cost"), latency_s=res.get("latency_s"), error=res.get("error"))
         if res.get("resumed"):
             row["resumed"] = True
+        if j["model"] == benchmod.ROUTER and res.get("model"):
+            row["picked_model"] = res["model"]  # the response names the model the router chose
         if res["status"] == "success":
             files = (res.get("outputs") or {}).get("files") or []
             url = res.get("imageURL") or res.get("videoURL") or (files[0]["url"] if files else None)

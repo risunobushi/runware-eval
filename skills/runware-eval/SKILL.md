@@ -53,11 +53,15 @@ tell from a read-only check.
 > | `metrics list` or `metrics control` | the checks this bench can use; test them on unchanged inputs |
 > | `recipes list` or `recipes extract` | recipe files and their past runs |
 >
-> Spend is capped by `budget.max_usd` in `bench.yaml`, and an interrupted run can be run again
+> Spend is capped by `budget.maxPrice` in `bench.yaml`, and an interrupted run can be run again
 > without paying twice.
 
 Do not write a dollar sign directly followed by a digit anywhere in this file: the agent harness
 replaces such tokens with the skill's arguments. Write prices as `0.006 USD`.
+
+**Use the Model Router's words** where they fit, with the user and in `bench.yaml`: quality, speed and
+cost for what is compared, `maxPrice` for a price ceiling, `requirements` for what the result must
+meet. A user who has used `model: auto` should not have to learn a second vocabulary.
 
 ## Step 0 — Preflight: Runware CLI and uv, before anything else
 
@@ -159,22 +163,23 @@ it is how users discover dimensions they had not thought of.
    | Aesthetics | Is it good? (subjective — needs calibration) |
    | Technical quality | Is it clean? (sharpness, artefacts, banding) |
 
-   Cost, latency and failure rate are always measured. Say so.
+   Cost, speed and failure rate are always measured. Say so.
 3. **Follow-ups only for the chosen dimensions**: which region must stay fixed (do they have masks,
    or should the bench generate them), expected text, reference identity. Do not ask the user to
    choose between "gate" and "rank", and do not use those words with them: every measurement counts
    in the report either way (see Step 2, point 6).
-4. **Budget and size:** the budget cap in USD for one full run, and the **maximum number of models**
-   to test (e.g. 3 or 5; it cuts time and spend). Write it as `max_models` in `bench.yaml` and
+4. **Budget and size:** the most one full run may spend, in USD (`budget.maxPrice` in `bench.yaml`),
+   and the **maximum number of models**
+   to test (e.g. 3 or 5; it cuts time and spend). Write it as `maxModels` in `bench.yaml` and
    propose exactly that many in Step 3; the runner refuses more. Seeds: 1 in the smoke round, **3 in
    the full run** (`seeds: [1, 2, 3]`), so one unlucky or lucky generation does not decide: each
-   check is judged by `pass_rule` (default `majority` of seeds, per input; also `all` or `any`).
+   check is judged by `passRule` (default `majority` of seeds, per input; also `all` or `any`).
 
 ## Step 2 — Turn the brief into checks
 
 Metrics are files, like recipes: a curated library ships with the runner (listed in
 `references/metric-catalog.md`, generated from the code), and a bench can add its own in `metrics/`
-(or shared `metric_dirs`). `uv run --project <runner> runware-eval metrics list bench.yaml` shows
+(or shared `metricDirs`). `uv run --project <runner> runware-eval metrics list bench.yaml` shows
 what this bench can use.
 
 **Start from the brief, not from the library.** The library covers common cases (a product that must
@@ -284,6 +289,13 @@ out of what you parse (`2>/dev/null`): a `Showing N of M results` footer goes th
 5. **Propose recipes, not just models:** quality tiers, prompt variants and mask variants of strong
    candidates; a cheap tier of a good model is a real contender. Size the list to the budget:
    recipes x inputs x seeds x price must fit the cap for the full run, not just the smoke round.
+6. **Offer the Model Router as a baseline.** Runware's Model Router (`model: auto`) picks a model
+   from the request alone. Ask the user whether to add a router recipe (see "Router recipes" in
+   `references/bench-format.md`): `routing.allowedModels: bench` makes it choose among the models
+   under test, and a second recipe with `preferences: { quality: 5, speed: 0, cost: 0 }` shows what
+   the weights change. The report then says whether the router's pick passes the brief's checks, and
+   which model to call by name if it does not. It counts as recipes for the budget, not as a model
+   for `maxModels`.
 
 ## Step 4 — Normalise and write the bench
 
@@ -299,7 +311,7 @@ Write each recipe as its own file in `recipes/<id>.yaml` (self-contained: prompt
 on every translated convention), and list them by id in `bench.yaml`, following
 `references/bench-format.md`. Before creating a recipe, run
 `uv run --project <runner> runware-eval recipes list bench.yaml`: if a recipe for the same model and
-settings already exists in the bench's recipe folders (or a team folder in `recipe_dirs`), reuse it
+settings already exists in the bench's recipe folders (or a team folder in `recipeDirs`), reuse it
 instead of writing a near-duplicate. The bench is the deliverable: it must re-run later without an
 agent, and adding a model must mean adding one recipe file.
 
@@ -326,11 +338,11 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    no reliable dry-run (the `X-Runware-Dry-Run` header executed and billed in testing), so never
    promise a free price check. Show the user the table and get a yes.
 2. **Smoke round:** `uv run --project <runner> runware-eval run bench.yaml --round smoke` (first input, first seed, every
-   recipe). It records real cost and latency per task, masks every output and writes the report.
+   recipe). It records real cost and speed per task, masks every output and writes the report.
    Look at every output for inverted masks, cropping and ignored instructions; fix recipes first.
 3. **Full run:** `uv run --project <runner> runware-eval estimate bench.yaml --round full` (now with measured costs), then, with
    the user's OK, `uv run --project <runner> runware-eval run bench.yaml --round full`. It stops before starting if the projected
-   total would pass `budget.max_usd`.
+   total would pass `budget.maxPrice`.
 4. **Report:** `uv run --project <runner> runware-eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
    the best recipe and what it still misses, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
    region crops, gallery and all data, in one file. Put your reading of the results (what passed, what
@@ -357,13 +369,13 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    pick one for the user.
 
 Vision-model checks run in `score` as the second stage of a funnel: only outputs that fail at most
-`judge_when.max_failed_checks` pixel checks are judged, with one combined call per judge (about
+`judgeWhen.maxFailedChecks` pixel checks are judged, with one combined call per judge (about
 0.006 USD per judged output; cached; `--no-judges` skips them). When picking metrics in Step 2, give the
 judges only questions no pixel check can answer. 3D outputs (GLB) and video
 outputs (MP4) need nothing extra: the runner renders or reads them into images first, see the 3D and
 video sections of `references/metrics.md`. For video recipes set `taskType: videoInference`, pass the
-start image in `inputs.frameImages`, switch audio and prompt rewriting off, and give `price_usd`
-(video is priced per second). Metrics marked `planned` in the
+start image in `inputs.frameImages`, switch audio and prompt rewriting off, and give `price`
+(USD per output; video is priced per second). Metrics marked `planned` in the
 registry (OCR) show as *not run* in the report. Say so; never present them as passed.
 
 **Before reporting, check the limits and the standings against the outputs.** A check that every

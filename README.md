@@ -35,7 +35,7 @@ changing my product?"* The skill will:
 
 1. check the Runware CLI and uv, install what is missing, and ask you to sign in once;
 2. ask what you want to evaluate (deviation, pixel shift, identity, text, prompt adherence,
-   aesthetics, technical quality), with cost and latency always measured;
+   aesthetics, technical quality), with cost and speed always measured;
 3. pick metrics from the library (`references/metric-catalog.md`), or write a new one with you;
 4. find candidate models in the catalog with the CLI and read their schemas;
 5. write `bench.yaml` and one file per recipe, and estimate the cost;
@@ -79,15 +79,22 @@ random pairs, with recipe names hidden. Labels stay in your browser; agreement w
 threshold that would agree best and your own ranking are computed in the page as you click. "Export
 labels.json" hands them to `runware-eval calibrate` or to a colleague, who can import them.
 
-**Spend.** `budget.max_usd` is required. A run stops before it starts if the estimate passes the cap,
+**Spend.** `budget.maxPrice` (USD for one full run) is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its
 own estimate still fit, and a recipe that costs more than estimated is reserved at its real cost from
 then on. Tasks that did not start are listed in the report; raise the cap and run again to fill them
-in. A recipe with no known price must state one (`price_usd:` in its file).
+in. A recipe with no known price must state one (`price:` in its file, USD per output).
 
 **Interrupted runs.** Tasks are sent with Runware's async delivery and polled, so no connection is held open while a model works. Every task is logged in `submitted.jsonl` before it is sent. Run the same command
 again and the runner first asks Runware for the results of tasks already sent; one that is still
 running is not sent a second time.
+
+**Model Router.** A recipe with `model: auto` lets [Runware's Model Router](https://runware.ai/model-router)
+pick the model, among the bench's models (`routing.allowedModels: bench`) or the whole catalog, with your
+weights and price ceiling. The router chooses from the request and never sees the output; the bench
+measures what it produced. The report shows what it picked on each call, how those outputs did against
+your checks, and how the same model did when called by name: use `auto` where its pick passes, and call a
+model by name where it does not.
 
 Recipes are one file each in `recipes/`, fingerprinted. Copy a file into another bench to share it;
 matching past results (same fingerprint, same images, same seed) are reused instead of paid for:

@@ -14,7 +14,7 @@ from skimage.color import deltaE_ciede2000, rgb2lab
 
 from . import _labeling, catalog
 from ._assets import CSS, FONTS
-from .bench import stem
+from .bench import ROUTER, stem
 from .score import JUDGED, Pair, coverage, erode, find_mask, label as metric_label, metric_id
 
 e = html.escape
@@ -272,6 +272,104 @@ def scatter(points, xname, yname, xnote="", ynote="", xgate=None, ygate=None):
     return "<div class='chartwrap'>" + "".join(p) + "</div>"
 
 
+def short_model(air):
+    return air.split(":", 1)[-1] if air else "?"
+
+
+def router_rows(agg, order, recipes, errors, best):
+    """One row per `model: auto` recipe: what the router picked on each call, how those outputs did
+    against the checks, and how the same model did when the bench called it by name."""
+    by_model = {}
+    for rid in order:
+        m = recipes.get(rid, {}).get("model")
+        if m and m != ROUTER:
+            by_model.setdefault(m, []).append(rid)
+    rows = []
+    for rid in order:
+        r = recipes.get(rid, {})
+        if r.get("model") != ROUTER:
+            continue
+        a, picks, by_pick = agg[rid], {}, {}
+        for s in a["items"]:
+            m = s.get("picked_model") or "not recorded"
+            picks[m] = picks.get(m, 0) + 1
+            by_pick.setdefault(m, []).append(sum(1 for g in gate_rows(s) if g["pass"] is False))
+        rt = r.get("routing") or {}
+        pref = rt.get("preferences")
+        pool = rt.get("allowedModels")
+        settings = [("pool: this bench's models" if pool == "bench" else f"pool: {len(pool)} listed models" if pool
+                     else f"pool: catalog minus {len(rt['excludedModels'])}" if rt.get("excludedModels")
+                     else "pool: whole catalog"),
+                    " · ".join(f"{k} {v}" for k, v in pref.items()) if pref else "even weights"]
+        if rt.get("maxPrice") is not None:
+            settings.append(f"max ${rt['maxPrice']}")
+        rows.append({"id": rid, "picks": sorted(picks.items(), key=lambda x: -x[1]), "by_pick": by_pick,
+                     "calls": len(a["items"]), "failed_calls": sum(1 for x in errors if x.get("recipe") == rid),
+                     "settings": settings, "requirements": " ".join(str(rt.get("requirements") or "").split()),
+                     "by_name": by_model, "place": order.index(rid) + 1,
+                     "best_model": recipes.get(best, {}).get("model")})
+    return rows
+
+
+def router_section(rows, agg, order, recipes, best, sec_head):
+    if not rows:
+        return ""
+    out = ["<section id='router'>" + sec_head(
+        "Model Router",
+        "Recipes with <span class='mono'>model: auto</span> let Runware's Model Router choose the model. It chooses "
+        "from the request (schemas, prices, your routing settings, benchmark scores) and does not see the output, "
+        "so the same request can get a different model on another call: each seed below is one call. A router "
+        "recipe sends one request, so a model that needs other fields than the ones it sends cannot be chosen, "
+        "and whatever the request leaves out (size, seed, model settings) is filled in by the router. The checks "
+        "are the same ones every other recipe gets.")]
+    lines = []
+    for x in rows:
+        a = agg[x["id"]]
+        top, n = x["picks"][0]
+        s = (f"<strong>{e(x['id'])}</strong> picked <span class='mono'>{e(short_model(top))}</span> on {n} of "
+             f"{x['calls']} calls" + (f" ({len(x['picks'])} different models)" if len(x["picks"]) > 1 else "")
+             + f". It stands #{x['place']} of {len(order)}"
+             + (f", failing {a['fails']} of {a['checks']} checks" if a["checks"] else "") + ". ")
+        if best == x["id"]:
+            s += "It is the best recipe against this brief's checks."
+        elif x["best_model"] == ROUTER:
+            s += f"The best recipe, {e(best)}, is another router recipe."
+        else:
+            k = dict(x["picks"]).get(x["best_model"], 0)
+            s += (f"The best recipe, {e(best)}, calls <span class='mono'>{e(short_model(x['best_model']))}</span>: "
+                  + (f"the router chose that model on {k} of {x['calls']} calls." if k
+                     else "the router never chose that model."))
+        if x["failed_calls"]:
+            s += f" {x['failed_calls']} call(s) failed (see Findings)."
+        lines.append(note(s))
+    out.append(f"<ul class='notes'>{''.join(lines)}</ul>")
+    out.append("<div class='tablewrap'><table><thead><tr><th>Router recipe</th><th>Routing settings</th>"
+               "<th>Picked</th><th>Calls</th><th title='Failed checks per output, lowest to highest'>Failed checks "
+               "per output</th><th>Same model, called by name</th></tr></thead><tbody>")
+    for x in rows:
+        span = len(x["picks"])
+        for i, (m, n) in enumerate(x["picks"]):
+            fails = sorted(x["by_pick"][m])
+            f_txt = str(fails[0]) if fails[0] == fails[-1] else f"{fails[0]}–{fails[-1]}"
+            named = x["by_name"].get(m, [])
+            named_txt = "<br>".join(
+                f"<button data-id='{e(q)}' class='linkish'>{e(q)}</button> <span class='mono'>#{order.index(q) + 1} · "
+                f"{agg[q]['fails']} of {agg[q]['checks']} failed</span>" for q in named) or (
+                "<span class='muted'>not in this bench</span>" if m != "not recorded" else "")
+            head = ""
+            if i == 0:
+                req = (f"<div class='strip' title='{e(x['requirements'])}'>requirements: "
+                       f"{e(x['requirements'][:80])}{'…' if len(x['requirements']) > 80 else ''}</div>"
+                       if x["requirements"] else "")
+                head = (f"<td rowspan='{span}'><button data-id='{e(x['id'])}' class='linkish'>{e(x['id'])}</button>"
+                        f"<div class='strip'>#{x['place']} of {len(order)}</div></td>"
+                        f"<td rowspan='{span}'>{e(' · '.join(x['settings']))}{req}</td>")
+            out.append(f"<tr>{head}<td class='mono'>{e(m)}</td><td class='mono'>{n} of {x['calls']}</td>"
+                       f"<td class='mono'>{f_txt}</td><td>{named_txt}</td></tr>")
+    out.append("</tbody></table></div></section>")
+    return "".join(out)
+
+
 def gate_of(scores, lab):
     for it in scores:
         for m in it["metrics"]:
@@ -292,9 +390,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     in_order = [k for k in inputs if any(s["input"] == k for s in scored)]
     recipes = {r["id"]: r for r in b["recipes"]}
 
-    # aggregate per recipe: seeds are judged by `pass_rule` within each input (one unlucky or lucky seed
+    # aggregate per recipe: seeds are judged by `passRule` within each input (one unlucky or lucky seed
     # does not decide), then a recipe must pass a check on every input
-    rule = b.get("pass_rule", "majority")
+    rule = b.get("passRule", b.get("pass_rule", "majority"))
     agg = {}
     for s in scored:
         a = agg.setdefault(s["recipe"], {"items": [], "costs": [], "lat": [], "by_check": {}})
@@ -345,7 +443,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         else:
             f = os.path.join(out_dir, s["file"])
             p = Pair(b, inputs[s["input"]], f, find_mask(out_dir, s["file"], s["recipe"]))
-        strip = [recipes.get(s["recipe"], {}).get("model", "")]
+        strip = [f"auto → {s['picked_model']}" if s.get("picked_model") else recipes.get(s["recipe"], {}).get("model", "")]
         if len({x["seed"] for x in scored}) > 1:
             strip.append(f"seed {s['seed']}")
         if s.get("latency_s") is not None:
@@ -393,6 +491,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
            f"<body><div class='wrap'>"]
     seeds = sorted({s["seed"] for s in scored})
     best = order[0]
+    routed = router_rows(agg, order, recipes, errors, best)
     cheapest_pass = min(passing, key=lambda r: agg[r]["cost"] or 9) if passing else None
     # headline: the recommendation, then what it costs and how many checks it passes.
     # `best` is the first in `order`: fewest failed checks, then best average place, then cheapest
@@ -456,6 +555,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                + second
                + "<div class='card lit' id='pick-card' hidden><span class='lab'>Your pick (blind pairs)</span>"
                  "<span class='big' id='pick-big'></span><span class='strip' id='pick-foot'></span></div>"
+               + "".join(card("Model Router's pick stands", f"#{x['place']} of {len(order)}",
+                              f"{e(x['id'])} · picked {e(short_model(x['picks'][0][0]))} on "
+                              f"{x['picks'][0][1]} of {x['calls']} calls")
+                         for x in routed[:1])
                + card("Checks not run", len(not_run), e(", ".join(not_run)) or "all ran")
                + card("Failed tasks", len(errors), e(", ".join(sorted({x["recipe"] for x in errors}))) or "none")
                + "</div></section>")
@@ -553,7 +656,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "<strong>average place</strong> (place 1 = best on a measurement; places are averaged inside each "
                "dimension, then across dimensions, so a dimension counts once however many measurements it has), "
                "then by cost. "
-               + (f"A check passes when it passes on {rule_txt} of every input (<span class='mono'>pass_rule: {e(rule)}"
+               + (f"A check passes when it passes on {rule_txt} of every input (<span class='mono'>passRule: {e(rule)}"
                   "</span>). " if any_checks else "This bench sets no limits, so nothing passes or fails here. ")
                + "Cells: mean over inputs and seeds; ↑ higher is better, ↓ lower is better; bold = best in the column."
                + (f" Not placed (not measured for every recipe, or no better direction): {e(', '.join(unplaced))}."
@@ -562,7 +665,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                + "".join(f"<th class='grp' colspan='{n}'>{e(d.replace('_', ' '))}</th>" for d, n in groups)
                + "<th></th><th></th></tr><tr><th>#</th><th>Recipe</th><th>Failed</th><th title='Average of this recipe&#39;s places on the measurements; 1.0 = best on all of them'>Average place</th>"
                + "".join(f"<th>{e(c['label'])}{arrow.get(direction.get(c['key']), '')}</th>" for c in cols)
-               + "<th>$/output</th><th>Time</th></tr></thead><tbody>")
+               + "<th title='USD per output'>Cost</th><th title='Seconds from request to result'>Speed</th></tr></thead><tbody>")
+    model_txt = {x["id"]: "auto → " + ", ".join(f"{short_model(m)} ×{n}" for m, n in x["picks"]) for x in routed}
     for n, rid in enumerate(order, 1):
         a, cells = agg[rid], []
         for c in cols:
@@ -589,10 +693,11 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         by_dim = " · ".join(f"{d.replace('_', ' ')} {p:.1f}" for d, p in a["place_by_dim"].items())
         place = f"<span title='{e(by_dim)}'>{a['place']:.1f}</span>" if a["place"] is not None else "—"
         out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' class='linkish'>{e(rid)}</button><div class='strip'>"
-                   f"{e(recipes.get(rid, {}).get('model', ''))} · {e(recipes.get(rid, {}).get('_fp', '') or '')[:8]}</div></td>"
+                   f"{e(model_txt.get(rid) or recipes.get(rid, {}).get('model', ''))} · {e(recipes.get(rid, {}).get('_fp', '') or '')[:8]}</div></td>"
                    f"<td class='mono'>{failed}</td><td class='mono'>{place}</td>{''.join(cells)}"
                    f"<td class='mono'>{cost}</td><td class='mono'>{lat}</td></tr>")
     out.append("</tbody></table></div><p class='muted' style='font-size:12px'>* listed price, not measured.</p></section>")
+    out.append(router_section(routed, agg, order, recipes, best, sec_head))
 
     # comparison viewer
     crop_name = next((o.get("crop_name") for o in originals.values() if o.get("crop_name")), None)
@@ -630,8 +735,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "<img id='turn' alt='Views of the output'></div></div></section>")
 
     # gallery
-    out.append("<section>" + sec_head("Outputs", ("Each recipe's best seed (the one that fails the fewest checks): model · seed · time · cost. "
-                                               if len(seeds) > 1 else "Model · time · cost. ") + "Click to compare."))
+    out.append("<section>" + sec_head("Outputs", ("Each recipe's best seed (the one that fails the fewest checks): model · seed · speed · cost. "
+                                               if len(seeds) > 1 else "Model · speed · cost. ") + "Click to compare."))
     for k in in_order:
         if len(in_order) > 1:
             out.append(f"<h3 class='ink2'>{e(k)}</h3>")
@@ -666,7 +771,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     out.append("<section>" + sec_head("All measurements", "The measured values, before any threshold: the same "
                                       "for every user and every re-run of the same outputs.") + "<details><summary>Show table</summary><div class='tablewrap' "
                "style='margin-top:12px'><table><thead><tr><th>Input</th><th>Recipe</th><th>Seed</th><th>Native</th>"
-               "<th>Cost</th><th>Time</th>" + "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")
+               "<th>Cost</th><th title='Seconds from request to result'>Speed</th>" + "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")
     for s in sorted(scored, key=lambda s: (s["input"], order.index(s["recipe"]), s["seed"])):
         byl = {m["label"]: m for m in s["metrics"]}
         cells = "".join(f"<td class='mono'>{fmtv(byl[l]['values'].get('value')) if l in byl and byl[l]['status'] == 'ok' else '—'}</td>"
