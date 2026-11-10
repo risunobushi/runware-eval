@@ -291,7 +291,8 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    `runware-eval calibrate bench.yaml --round <r> --labels <file>`, which prints the same analysis
    and stores the labels with the run, so the rebuilt report opens with them. Show the suggestions;
    change `bench.yaml` only with the user's yes. Below about 20 labels, call the suggestions hints.
-   (`runware-eval label` still builds a separate page that covers every seed, not just the first.)
+   The report shows and offers for labeling each recipe's best seed (the one that fails the fewest
+   checks); `runware-eval label` still builds a separate page that covers every seed.
    Keep the three layers apart when you report: measured values are shared evidence; pass or fail
    is this brief's thresholds; labels and rankings are this user's preference. The report shows
    "Your pick" beside "Best against this brief's checks"; when they disagree, say so and do not

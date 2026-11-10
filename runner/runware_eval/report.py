@@ -260,6 +260,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             f = os.path.join(out_dir, s["file"])
             p = Pair(b, inputs[s["input"]], f, find_mask(out_dir, s["file"], s["recipe"]))
         strip = [recipes.get(s["recipe"], {}).get("model", "")]
+        if len({x["seed"] for x in scored}) > 1:
+            strip.append(f"seed {s['seed']}")
         if s.get("latency_s") is not None:
             strip.append(f"{s['latency_s']:.1f}s")
         if s.get("cost") is not None:
@@ -278,9 +280,13 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             it["turn_title"] = s.get("turn_title")
         if s.get("clip") and os.path.exists(os.path.join(out_dir, s["clip"])):
             it["_clip_path"] = os.path.join(out_dir, s["clip"])
+        # one output per recipe and input is shown and offered for labeling: the recipe's best seed,
+        # i.e. the one that fails the fewest checks (the lowest seed number on a tie)
         key = f"{s['input']}|{s['recipe']}"
-        if key not in items or s["seed"] < items[key]["_seed"]:
-            items[key] = {**it, "_seed": s["seed"], "file": s["file"], "input": s["input"], "recipe": s["recipe"]}
+        rank = (sum(1 for g in it["gates"] if g["pass"] is False), s["seed"])
+        if key not in items or rank < items[key]["_rank"]:
+            items[key] = {**it, "_rank": rank, "seed": s["seed"], "file": s["file"], "input": s["input"],
+                          "recipe": s["recipe"]}
 
     # video previews: the first seed of each recipe, embedded while the report stays within the size budget
     clip_bytes, clips_left_out = 0, 0
@@ -452,7 +458,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
 
     # comparison viewer
     crop_name = next((o.get("crop_name") for o in originals.values() if o.get("crop_name")), None)
-    out.append("<section id='compare'>" + sec_head("Output vs original"))
+    out.append("<section id='compare'>" + sec_head("Output vs original", "Shown per recipe: its best seed, the one that fails the fewest checks."
+                                               if len(seeds) > 1 else ""))
     if len(in_order) > 1:
         out.append("<div class='picker' role='group' aria-label='Input'>" + "".join(
             f"<button data-in='{e(k)}' aria-pressed='false'>{e(k)}</button>" for k in in_order) + "</div>")
@@ -481,7 +488,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     out.append("<div class='panel'><h3>Checks</h3><dl class='kv' id='kv'></dl></div></div></div></section>")
 
     # gallery
-    out.append("<section>" + sec_head("Outputs", "First seed per recipe: model · time · cost. Click to compare."))
+    out.append("<section>" + sec_head("Outputs", ("Each recipe's best seed (the one that fails the fewest checks): model · seed · time · cost. "
+                                               if len(seeds) > 1 else "Model · time · cost. ") + "Click to compare."))
     for k in in_order:
         if len(in_order) > 1:
             out.append(f"<h3 class='ink2'>{e(k)}</h3>")
@@ -524,7 +532,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     payload = {"inputs": in_order, "order": order, "originals": originals, "cal": cal_data, "lab": lab_data, "best": best,
                "recipes": {r: {"checks": a["checks"], "fails": a["fails"], "cost": a["cost"],
                                "model": recipes.get(r, {}).get("model", "")} for r, a in agg.items()},
-               "items": {k: {kk: vv for kk, vv in v.items() if kk not in ("thumb", "_seed", "strip")} for k, v in items.items()}}
+               "items": {k: {kk: vv for kk, vv in v.items() if kk not in ("thumb", "_rank", "strip")} for k, v in items.items()}}
     out.append(f"<div class='tip' role='tooltip'></div><script type='application/json' id='data'>{json.dumps(payload)}"
                f"</script><script>{JS}{_labeling.JS}</script></div></body></html>")
     out_path = out_path or os.path.join(out_dir, "report.html")
