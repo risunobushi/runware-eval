@@ -5,6 +5,7 @@ import html
 import io
 import json
 import os
+import re
 from datetime import date
 
 import numpy as np
@@ -31,18 +32,19 @@ document.querySelectorAll('.pt').forEach(g => {
     tip.style.left = (ev.clientX + 14) + 'px'; tip.style.top = (ev.clientY + 14) + 'px'; });
   g.addEventListener('mouseleave', () => tip.style.opacity = 0);
 });
-const ba = document.querySelector('.ba'), after = ba.querySelector('.after'), bar = ba.querySelector('.bar'),
-      knob = ba.querySelector('.knob');
-let pos = .5;
-function setPos(p){ pos = Math.max(0, Math.min(1, p)); after.style.clipPath = `inset(0 0 0 ${pos*100}%)`;
-  bar.style.left = knob.style.left = (pos*100) + '%'; }
-let drag = false;
-const move = ev => { const r = ba.getBoundingClientRect(); setPos((ev.clientX - r.left) / r.width); };
-ba.addEventListener('pointerdown', ev => { drag = true; ba.setPointerCapture(ev.pointerId); move(ev); });
-ba.addEventListener('pointermove', ev => drag && move(ev));
-ba.addEventListener('pointerup', () => drag = false);
-ba.tabIndex = 0;
-ba.addEventListener('keydown', ev => { if (ev.key === 'ArrowLeft') setPos(pos - .05); if (ev.key === 'ArrowRight') setPos(pos + .05); });
+document.querySelectorAll('.ba').forEach(el => {
+  const after = el.querySelector('.after'), bar = el.querySelector('.bar'), knob = el.querySelector('.knob');
+  let pos = .5, drag = false;
+  function setPos(p){ pos = Math.max(0, Math.min(1, p)); after.style.clipPath = `inset(0 0 0 ${pos*100}%)`;
+    bar.style.left = knob.style.left = (pos*100) + '%'; }
+  const move = ev => { const r = el.getBoundingClientRect(); setPos((ev.clientX - r.left) / r.width); };
+  el.addEventListener('pointerdown', ev => { drag = true; el.setPointerCapture(ev.pointerId); move(ev); });
+  el.addEventListener('pointermove', ev => drag && move(ev));
+  el.addEventListener('pointerup', () => drag = false);
+  el.tabIndex = 0;
+  el.addEventListener('keydown', ev => { if (ev.key === 'ArrowLeft') setPos(pos - .05); if (ev.key === 'ArrowRight') setPos(pos + .05); });
+});
+const ba = document.querySelector('.ba');
 let cur = {input: D.inputs[0], recipe: D.order[0]};
 function chip(ok){ return ok === null ? '<span class="chip na">n/a</span>' : ok ? '<span class="chip ok">✓ pass</span>' : '<span class="chip bad">✕ fail</span>'; }
 function show(){
@@ -59,7 +61,7 @@ function show(){
   if (r.clip) { if (cv.getAttribute('src') !== r.clip) cv.src = r.clip; } else { cv.pause(); cv.removeAttribute('src'); }
   const co = document.getElementById('crop-out'); if (co) { co.src = r.crop || ''; document.getElementById('crop-out-cap').textContent = cur.recipe; }
   document.getElementById('kv').innerHTML = r.gates.map(g =>
-    `<dt>${g.label}</dt><dd class="mono">${g.value}</dd><dd>${chip(g.pass)}</dd>`).join('');
+    `<dt>${g.label}</dt><dd class="mono">${g.value}</dd><dd>${g.gate ? chip(g.pass) : ''}</dd>`).join('');
   document.querySelectorAll('.picker button[data-id]').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === cur.recipe));
   document.querySelectorAll('.picker button[data-in]').forEach(b => b.setAttribute('aria-pressed', b.dataset.in === cur.input));
 }
@@ -119,16 +121,18 @@ def fmtv(v):
     return str(v)
 
 
-def gate_rows(item):
+def gate_rows(item, every=False):
+    """The checks with a limit; with `every`, the measurements without one too (their `pass` is None)."""
     out = []
     for m in item["metrics"]:
-        if m["mode"] != "gate":
+        if m["mode"] != "gate" and not every:
             continue
         v = m.get("values", {})
         val = fmtv(v.get("value")) + (f" · p95 {fmtv(v['p95'])}" if "p95" in v and "p95_max" in m["thresholds"] else "")
         out.append({"key": f"{m['dimension']}:{m['label']}", "dimension": m["dimension"], "label": m["label"],
                     "value": val if m["status"] == "ok" else m["status"].replace("_", " "),
-                    "pass": m.get("pass") if m["status"] == "ok" else None})
+                    "gate": m["mode"] == "gate",
+                    "pass": m.get("pass") if m["status"] == "ok" and m["mode"] == "gate" else None})
     return out
 
 
@@ -191,9 +195,29 @@ def metric_value(item, label_or_cost):
     return None
 
 
-def scatter(points, xlab, ylab, xgate=None, ygate=None):
-    """points: [(name, x, y, fails)]. Gates: (value, 'min'|'max') draw the target zone."""
-    W, H, ml, mr, mt, mb = 1100, 440, 64, 24, 20, 52
+BETTER = {"lower": "Less=Better", "higher": "More=Better", "closer_to_zero": "Closer to 0=Better"}
+
+
+def split_note(text):
+    """A note as (lead, rest): its bold opening, else its first sentence. The report shows the lead and folds the rest."""
+    m = re.match(r"\s*(<(b|strong)>.*?</\2>)[\s:.]*(.*)", text, re.S) or re.match(r"(.*?[.:])\s+(.*)", text, re.S)
+    if not m:
+        return text.strip(), ""
+    lead, rest = m.group(1).strip(), m.groups()[-1].strip()
+    return lead[:-1] if lead.endswith(":") else lead, rest[:1].upper() + rest[1:]
+
+
+def note(lead, rest="", warn=False):
+    cls = " class='warn'" if warn else ""
+    if not rest:
+        return f"<li{cls}><div class='lead'>{lead}</div></li>"
+    return f"<li{cls}><details><summary>{lead}</summary><div class='more'>{rest}</div></details></li>"
+
+
+def scatter(points, xname, yname, xnote="", ynote="", xgate=None, ygate=None):
+    """points: [(name, x, y, fails)]. Gates: (value, 'min'|'max') draw the target zone; with a gate, dots
+    are coloured by whether they sit inside it, otherwise by whether the recipe fails any check."""
+    W, H, ml, mr, mt, mb = 1100, 440, 78, 24, 20, 56
     xs, ys = [p[1] for p in points], [p[2] for p in points]
     x0, x1 = min(xs + [xgate[0]] if xgate else xs), max(xs + [xgate[0]] if xgate else xs)
     y1 = max(ys + [ygate[0]] if ygate else ys)
@@ -201,13 +225,17 @@ def scatter(points, xlab, ylab, xgate=None, ygate=None):
     x0, x1, y0, y1 = x0 - padx, x1 + padx * 2.2, 0, y1 * 1.15 or 1
     sx = lambda v: ml + (v - x0) / (x1 - x0) * (W - ml - mr)
     sy = lambda v: mt + (1 - (v - y0) / (y1 - y0)) * (H - mt - mb)
-    p = [f'<svg viewBox="0 0 {W} {H}" class="chart" role="img" aria-label="{e(ylab)} against {e(xlab)}">']
-    if xgate and ygate:
-        zx0, zx1 = (sx(xgate[0]), W - mr) if xgate[1] == "min" else (ml, sx(xgate[0]))
-        zy0, zy1 = (sy(ygate[0]), sy(y0)) if ygate[1] == "max" else (mt, sy(ygate[0]))
+    within = lambda v, g: g is None or (v >= g[0] if g[1] == "min" else v <= g[0])
+    gated = bool(xgate or ygate)
+    xtitle, ytitle = (f"{n} ({note})" if note else n for n, note in ((xname, xnote), (yname, ynote)))
+    p = [f'<svg viewBox="0 0 {W} {H}" class="chart" role="img" aria-label="{e(yname)} against {e(xname)}">']
+    if gated:
+        zx0, zx1 = (ml, W - mr) if not xgate else (sx(xgate[0]), W - mr) if xgate[1] == "min" else (ml, sx(xgate[0]))
+        zy0, zy1 = (mt, sy(y0)) if not ygate else (sy(ygate[0]), sy(y0)) if ygate[1] == "max" else (mt, sy(ygate[0]))
+        right = bool(xgate) and xgate[1] == "min"
         p.append(f'<rect x="{zx0:.1f}" y="{zy0:.1f}" width="{zx1 - zx0:.1f}" height="{zy1 - zy0:.1f}" class="zone"/>')
-        p.append(f'<text x="{(zx1 - 6) if xgate[1] == "min" else (zx0 + 6):.1f}" y="{zy1 - 8:.1f}" class="zone-label" '
-                 f'text-anchor="{"end" if xgate[1] == "min" else "start"}">PASSES BOTH</text>')
+        p.append(f'<text x="{(zx1 - 6) if right else (zx0 + 6):.1f}" y="{zy1 - 8:.1f}" class="zone-label" '
+                 f'text-anchor="{"end" if right else "start"}">WITHIN {"BOTH LIMITS" if xgate and ygate else "THE LIMIT"}</text>')
     for t in np.linspace(y0, y1, 5):
         p.append(f'<line x1="{ml}" x2="{W - mr}" y1="{sy(t):.1f}" y2="{sy(t):.1f}" class="grid"/>'
                  f'<text x="{ml - 8}" y="{sy(t) + 4:.1f}" class="tick" text-anchor="end">{fmtv(float(t))}</text>')
@@ -218,9 +246,9 @@ def scatter(points, xlab, ylab, xgate=None, ygate=None):
         p.append(f'<line x1="{sx(xgate[0]):.1f}" x2="{sx(xgate[0]):.1f}" y1="{mt}" y2="{sy(y0):.1f}" class="gate"/>')
     if ygate:
         p.append(f'<line x1="{ml}" x2="{W - mr}" y1="{sy(ygate[0]):.1f}" y2="{sy(ygate[0]):.1f}" class="gate"/>')
-    p.append(f'<text x="{(ml + W - mr) / 2:.1f}" y="{H - 8}" class="axis-title" text-anchor="middle">{e(xlab)}</text>')
-    p.append(f'<text transform="translate(14 {(mt + sy(y0)) / 2:.1f}) rotate(-90)" class="axis-title" '
-             f'text-anchor="middle">{e(ylab)}</text>')
+    p.append(f'<text x="{(ml + W - mr) / 2:.1f}" y="{H - 10}" class="axis-title" text-anchor="middle">{e(xtitle)}</text>')
+    p.append(f'<text transform="translate(20 {(mt + sy(y0)) / 2:.1f}) rotate(-90)" class="axis-title" '
+             f'text-anchor="middle">{e(ytitle)}</text>')
     placed = [(sx(x) - 6, sy(y) - 6, sx(x) + 6, sy(y) + 6) for _, x, y, _ in points]
     for name, x, y, fails in sorted(points, key=lambda q: q[2]):
         cx, cy, w = sx(x), sy(y), 6.6 * len(name)
@@ -233,9 +261,12 @@ def scatter(points, xlab, ylab, xgate=None, ygate=None):
                     not (box[2] < q[0] or box[0] > q[2] or box[3] < q[1] or box[1] > q[3]) for q in placed):
                 placed.append(box)
                 break
-        tipt = f"{name} · {xlab.split(' (')[0]} {fmtv(x)} · {ylab.split(' (')[0]} {fmtv(y)} · {fails} failed check(s)"
-        p.append(f'<g class="pt" data-tip="{e(tipt)}"><circle cx="{cx:.1f}" cy="{cy:.1f}" r="12" class="hit"/>'
-                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" class="dot{" fail" if fails else ""}"/><text x="{cx + dx:.1f}" y="{cy + dy:.1f}" '
+        inside = within(x, xgate) and within(y, ygate)
+        cls = (" in" if inside else " out") if gated else (" fail" if fails else "")
+        tipt = (f"{name} · {xname} {fmtv(x)} · {yname} {fmtv(y)} · "
+                + (("within" if inside else "outside") + " the limits shown · " if gated else "") + f"{fails} failed check(s)")
+        p.append(f'<g class="pt{cls}" data-tip="{e(tipt)}"><circle cx="{cx:.1f}" cy="{cy:.1f}" r="12" class="hit"/>'
+                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" class="dot{cls}"/><text x="{cx + dx:.1f}" y="{cy + dy:.1f}" '
                  f'text-anchor="{anchor}" class="lbl">{e(name)}</text></g>')
     p.append("</svg>")
     return "<div class='chartwrap'>" + "".join(p) + "</div>"
@@ -305,7 +336,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         rgb_in = Pair(b, inp, os.path.join(b["_dir"], inp["path"]), None).rgb_in
         originals[k] = {"img": uri(rgb_in, 900)}
         if box:
-            originals[k]["crop"] = uri(rgb_in[box[1]:box[3], box[0]:box[2]], 360, 90)
+            originals[k]["crop"] = uri(rgb_in[box[1]:box[3], box[0]:box[2]], 640, 90)
             originals[k]["crop_name"] = next(iter(boxes))
     for s in scored:
         if s.get("view"):  # 3D output: its rendered front view. Video output: its first frame
@@ -321,7 +352,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             strip.append(f"{s['latency_s']:.1f}s")
         if s.get("cost") is not None:
             strip.append(f"${s['cost']:.4f}")
-        it = {"img": uri(p.rgb_out, 900), "thumb": uri(p.rgb_out, 360, 80), "gates": gate_rows(s),
+        it = {"img": uri(p.rgb_out, 900), "thumb": uri(p.rgb_out, 360, 80), "gates": gate_rows(s, every=True),
               "strip": " · ".join(x for x in strip if x)}
         try:
             it["heat"] = uri(heatmap(p, first_de), 520)
@@ -329,7 +360,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             pass
         box = next(iter(p.boxes.values()), None)
         if box:
-            it["crop"] = uri(p.rgb_out[box[1]:box[3], box[0]:box[2]], 360, 90)
+            it["crop"] = uri(p.rgb_out[box[1]:box[3], box[0]:box[2]], 640, 90)
         if s.get("turntable") and os.path.exists(os.path.join(out_dir, s["turntable"])):
             it["turn"] = uri(Image.open(os.path.join(out_dir, s["turntable"])).convert("RGB"), 1200, 82)
             it["turn_title"] = s.get("turn_title")
@@ -374,25 +405,31 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     place_txt = (f"average place {ab['place']:.1f} across the measurements (1.0 = best on all of them)"
                  if ab["place"] is not None else "")
     if not any_checks:
-        headline = (f"Best on this brief's measurements: <em>{e(best)}</em>"
-                    + (f", {place_txt}" if place_txt else "") + f"{price}. No pass/fail limits are set.")
+        headline = (f"Best on this brief's measurements: <em>{e(best)}</em>.<br><span class='sub'>"
+                    + (f"{place_txt[:1].upper()}{place_txt[1:]}{price}. " if place_txt else f"Measured{price}. " if price else "")
+                    + "No pass/fail limits are set.</span>")
     elif passing:
-        headline = f"Best against this brief's checks: <em>{e(best)}</em>. Passes every check{price}."
+        headline = f"Best against this brief's checks: <em>{e(best)}</em>.<br><span class='sub'>Passes every check{price}.</span>"
     else:
-        headline = (f"Best against this brief's checks: <em>{e(best)}</em>. Passes {ab['checks'] - ab['fails']} "
-                    f"of {ab['checks']}{price}.")
+        headline = (f"Best against this brief's checks: <em>{e(best)}</em>.<br><span class='sub'>Passes "
+                    f"{ab['checks'] - ab['fails']} of {ab['checks']}{price}.</span>")
     pick_line = "<p class='goal' id='pick-line' hidden></p>"  # filled in by the page from the reader's labels
     controls = data.get("controls", [])
     checks_spend = data.get("judge_cost", 0) + sum(r.get("eval_cost") or 0 for r in data.get("attempted_rows", []))
+    goal = " ".join(b["goal"].split())
+    task = b.get("task") or re.split(r"(?<=[.!?])\s+", goal, maxsplit=1)[0]  # `task`, else the goal's first sentence
+    judges = data.get("judges") or []
+    facts = [("Recipes", len(agg), ""), ("Inputs", len(in_order), ", ".join(in_order)),
+             ("Seeds", ", ".join(map(str, seeds)), ""), ("Outputs", len(scored), ""),
+             ("Generation", f"${measured:.3f}", ""), ("Checks", f"${checks_spend:.3f}", "Spend on judges and paid checks"),
+             ("Judges", len(judges) or "off", ", ".join(judges)),
+             ("Controls", f"{sum(c['ok'] for c in controls)}/{len(controls)} ok" if controls else "none", "")]
     out.append("<header class='hero'>"
                f"<div class='kicker'><b>runware-eval</b> · bench report · {date.today()}</div>"
-               f"<h1>{headline}</h1>{pick_line}<p class='goal'><strong>{e(title)}</strong> {e(b['goal'].strip())}</p>"
-               f"<div class='meta'><span>{len(agg)} recipes</span><span>{len(in_order)} input(s)</span>"
-               f"<span>seed {', '.join(map(str, seeds))}</span><span>{len(scored)} outputs</span>"
-               f"<span>generation ${measured:.3f}</span><span>checks ${checks_spend:.3f}</span>"
-               f"<span>judges {e(', '.join(data.get('judges') or [])) or 'off'}</span>"
-               f"<span>controls {sum(c['ok'] for c in controls)}/{len(controls)} ok</span>"
-               "</div></header>")
+               f"<h1>{headline}</h1>{pick_line}<p class='goal' title='{e(goal)}'><strong>Task:</strong> {e(task)}</p>"
+               "<dl class='meta'>" + "".join(
+                   f"<div{f' title={chr(39)}{e(t)}{chr(39)}' if t else ''}><dt>{k}</dt><dd>{e(str(v))}</dd></div>"
+                   for k, v, t in facts) + "</dl></header>")
 
     def card(label, big, foot, lit=False):
         return (f"<div class='card{' lit' if lit else ''}'><span class='lab'>{label}</span>"
@@ -434,32 +471,28 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     full = max(len(a["items"]) for a in agg.values())
     partial = [f"{rid} ({len(a['items'])} of {full})" for rid, a in agg.items() if len(a["items"]) < full]
     if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial:
-        out.append("<section>" + sec_head("Findings") + "<ul class='notes'>")
-        out += [f"<li>{n}</li>" for n in notes.get("findings", [])]
-        out += [f"<li class='warn'>{n}</li>" for n in notes.get("caveats", [])]
+        rows = [note(*split_note(n)) for n in notes.get("findings", [])]
+        warns = [note(*split_note(n), warn=True) for n in notes.get("caveats", [])]
         for c in bad_ctl:
-            out.append(f"<li class='warn'><strong>Control failed:</strong> {e(c['label'])} on an unchanged copy of "
-                       f"{e(c['input'])}: {fmtv(c['value'])}, {'failed' if c['expected_pass'] else 'passed'} "
-                       f"(expected {'pass' if c['expected_pass'] else 'fail'}). Check or threshold does not fit "
-                       f"this bench.</li>")
+            warns.append(note(f"<strong>Control failed:</strong> {e(c['label'])}",
+                              f"On an unchanged copy of {e(c['input'])}: {fmtv(c['value'])}, "
+                              f"{'failed' if c['expected_pass'] else 'passed'} (expected "
+                              f"{'pass' if c['expected_pass'] else 'fail'}). Check or threshold does not fit this bench.", True))
+        failed = {}  # the same failure on several seeds is one line
         for x in errors:
-            out.append(f"<li class='warn'><strong>{e(x['recipe'])}</strong> on {e(x['input'])} failed: "
-                       f"{e(str(x.get('error')))}</li>")
+            failed.setdefault((x["recipe"], x["input"], str(x.get("error"))), []).append(x)
+        for (rid, inp, err), xs in failed.items():
+            warns.append(note(f"<strong>{e(rid)}</strong> failed on {e(inp)}" + (f" ({len(xs)} times)" if len(xs) > 1 else ""),
+                              e(err), True))
         if partial:
-            out.append(f"<li class='warn'><strong>Fewer outputs than the other recipes:</strong> "
-                       f"{e(', '.join(partial))}. Their verdicts rest on less evidence.</li>")
+            warns.append(note("<strong>Fewer outputs than the other recipes</strong>",
+                              f"{e(', '.join(partial))}. Their verdicts rest on less evidence.", True))
         if missing:
-            out.append(f"<li class='warn'><strong>No output in this folder:</strong> {e(', '.join(missing))}</li>")
-        out.append("</ul></section>")
-
-    # labeling, agreement with the checks and the reader's own ranking: all computed in the page
-    initial = {}
-    labels_path = os.path.join(out_dir, "labels.json")
-    if os.path.exists(labels_path):  # labels given to `runware-eval calibrate` travel with the report
-        initial = json.load(open(labels_path, encoding="utf8"))
-    cal_data, lab_data = _labeling.data(scored, items, title, os.path.basename(out_dir.rstrip("/\\")),
-                                        {"labels": initial.get("labels", {}), "pairs": initial.get("pairs", [])})
-    out.append("<section id='labels'>" + sec_head("Your labels") + _labeling.section(len(lab_data["pairs"])) + "</section>")
+            warns.append(note(f"<strong>No output in this folder:</strong> {e(', '.join(missing))}", warn=True))
+        out.append("<section>" + sec_head("Findings") + "".join(
+            f"<details class='fold'{' open' if w == 'findings' else ''}><summary>{len(x)} {w}<span class='muted'> · "
+            f"click a line for its detail</span></summary><ul class='notes'>{''.join(x)}</ul></details>"
+            for x, w in ((rows, "findings"), (warns, "caveats")) if x) + "</section>")
 
     # trade-off chart
     rep = b.get("report") or {}
@@ -474,13 +507,17 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             if xs and ys:
                 pts.append((rid, float(np.mean(xs)), float(np.mean(ys)), agg[rid]["fails"]))
         if pts:
-            xname = "Cost per image (USD) →" if xlab == "cost" else f"{xlab} →"
+            def better(lab, gate):  # the measurement's own direction, else the side its limit sits on
+                d = next((v for k, v in direction.items() if k.split(":", 1)[1] == lab), "")
+                return BETTER.get(d) or (BETTER["higher" if gate[1] == "min" else "lower"] if gate else "")
+            xgate, ygate = gate_of(scored, xlab) if xlab != "cost" else None, gate_of(scored, ylab)
             out.append("<section>" + sec_head(
                 ("Cost" if xlab == "cost" else e(xlab)) + f" vs {e(ylab)}",
-                "Mean across inputs. Dashed: pass limits. Filled: no failed check.")
-                       + scatter(pts, xname, f"{ylab} ↓ better" if (gate_of(scored, ylab) or (0, 'max'))[1] == "max"
-                                 else f"{ylab} ↑ better", gate_of(scored, xlab) if xlab != "cost" else None,
-                                 gate_of(scored, ylab)) + "</section>")
+                "Mean across inputs. " + ("Dashed: this brief's limits. Green: within the limits shown here. "
+                                          "Orange: outside them." if xgate or ygate else "Filled: no failed check."))
+                       + scatter(pts, "Cost per output (USD)" if xlab == "cost" else xlab, ylab,
+                                 BETTER["lower"] if xlab == "cost" else better(xlab, xgate), better(ylab, ygate),
+                                 xgate, ygate) + "</section>")
 
     # what the brief asks, and what measures it
     cov, _ = coverage(b)
@@ -570,23 +607,27 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         "<div class='ba' aria-label='Drag to compare original and output'><img class='before' alt='Original'>"
         "<div class='after'><img alt='Output'></div><div class='bar'></div><div class='knob'>⇆</div>"
         "<span class='tag l'>original</span><span class='tag r'></span></div><span class='muted' "
-        "style='font-size:12px'>Drag, or use ← → when focused.</span></div><div class='side'>"
-        "<div class='panel'><h3>Where the colour changed</h3><img id='heat' alt='Colour drift heatmap'>"
+        "style='font-size:12px'>Drag, or use ← → when focused.</span></div>"
+        f"<div class='panel'><h3>{'Checks and measurements' if any_checks else 'Measurements'}</h3>"
+        "<dl class='kv' id='kv'></dl></div></div>"
+        # everything else sits in a row under the slider, as wide as the page
+        "<div class='below'><div class='panel'><h3>Where the colour changed</h3><img id='heat' alt='Colour drift heatmap'>"
         "<div class='legend-bar'></div><div class='legend-ticks'><span>0 ΔE (unchanged)</span><span>"
         f"{HEAT_MAX / 2:.0f}</span><span>{HEAT_MAX:.0f}+ ΔE</span></div><p class='muted' style='font-size:12px'>"
         f"Same settings as the first colour check{' (hue and chroma only)' if first_de.get('ignore_lightness') else ''}."
         "</p></div>")
     if crop_name:
-        out.append(f"<div class='panel'><h3>{e(crop_name.capitalize())}</h3><div class='pair'><figure><img id='crop-in' "
-                   "alt='Original crop'><figcaption>original</figcaption></figure><figure><img id='crop-out' "
-                   "alt='Output crop'><figcaption id='crop-out-cap'></figcaption></figure></div></div>")
+        out.append(f"<div class='panel'><h3>{e(crop_name.capitalize())}</h3><div class='ba' aria-label='Drag to compare "
+                   "the original and output crop'><img class='before' id='crop-in' alt='Original crop'>"
+                   "<div class='after'><img id='crop-out' alt='Output crop'></div><div class='bar'></div>"
+                   "<div class='knob'>⇆</div><span class='tag l'>original</span>"
+                   "<span class='tag r' id='crop-out-cap'></span></div></div>")
     out.append("<div class='panel' id='clip-panel' hidden><h3>Clip</h3><video id='clip' controls loop muted "
                "playsinline style='width:100%;border-radius:var(--r)'></video>"
                + (f"<p class='muted' style='font-size:12px'>{clips_left_out} more clip(s) are in the run folder "
                   "(left out to keep this file small).</p>" if clips_left_out else "") + "</div>")
-    out.append("<div class='panel' id='turn-panel' hidden><h3 id='turn-title'>Views</h3>"
-               "<img id='turn' alt='Views of the output'></div>")
-    out.append("<div class='panel'><h3>Checks</h3><dl class='kv' id='kv'></dl></div></div></div></section>")
+    out.append("<div class='panel wide' id='turn-panel' hidden><h3 id='turn-title'>Views</h3>"
+               "<img id='turn' alt='Views of the output'></div></div></section>")
 
     # gallery
     out.append("<section>" + sec_head("Outputs", ("Each recipe's best seed (the one that fails the fewest checks): model · seed · time · cost. "
@@ -606,6 +647,15 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                        f"<span class='strip'>{e(it['strip'])}</span></figcaption></figure>")
         out.append("</div>")
     out.append("</section>")
+
+    # labeling, agreement with the checks and the reader's own ranking: all computed in the page
+    initial = {}
+    labels_path = os.path.join(out_dir, "labels.json")
+    if os.path.exists(labels_path):  # labels given to `runware-eval calibrate` travel with the report
+        initial = json.load(open(labels_path, encoding="utf8"))
+    cal_data, lab_data = _labeling.data(scored, items, title, os.path.basename(out_dir.rstrip("/\\")),
+                                        {"labels": initial.get("labels", {}), "pairs": initial.get("pairs", [])})
+    out.append("<section id='labels'>" + sec_head("Your labels") + _labeling.section(len(lab_data["pairs"])) + "</section>")
 
     # full data
     labels = []

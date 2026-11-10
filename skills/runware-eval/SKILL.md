@@ -334,7 +334,9 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
 4. **Report:** `uv run --project <runner> runware-eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
    the best recipe and what it still misses, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
    region crops, gallery and all data, in one file. Put your reading of the results (what passed, what
-   is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
+   is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Open each note with
+   a short `<b>bold claim</b>` (under ten words): the report lists only that line and folds the rest
+   behind a click, so the claim must stand alone and the rest should be one or two sentences. Hand the user the
    report, not loose images.
 
 5. **Calibrate against the user's eye** (after the smoke round, and again after the full run). The
