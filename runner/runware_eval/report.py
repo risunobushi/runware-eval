@@ -392,7 +392,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
 
     # aggregate per recipe: seeds are judged by `passRule` within each input (one unlucky or lucky seed
     # does not decide), then a recipe must pass a check on every input
-    rule = b.get("passRule", b.get("pass_rule", "majority"))
+    rule = b.get("passRule", "majority")
     agg = {}
     for s in scored:
         a = agg.setdefault(s["recipe"], {"items": [], "costs": [], "lat": [], "by_check": {}})

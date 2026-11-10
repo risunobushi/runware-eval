@@ -30,42 +30,8 @@ def _fix_bool_keys(o):
     return o
 
 
-# Older spelling -> current name. Settings follow the camelCase of Runware's API (`maxPrice`, `taskType`).
-# Old files keep working: they are renamed in memory when loaded, never rewritten on disk.
-RENAMED = {"max_models": "maxModels", "pass_rule": "passRule", "recipe_dirs": "recipeDirs",
-           "metric_dirs": "metricDirs", "judge_when": "judgeWhen"}
-RENAMED_IN = {"judgeWhen": {"max_failed_checks": "maxFailedChecks"}, "calibration": {"label_count": "labelCount"},
-              "budget": {"max_usd": "maxPrice"}}
-RECIPE_SIZE = {"max_side": "maxSide", "max_mp": "maxMp"}
-RECIPE_POST = {"transfer_detail": "transferDetail", "sigma_px": "sigmaPx", "feather_px": "featherPx"}
-
-
-def rename_keys(d, names):
-    """A copy of dict `d` with the keys in `names` renamed; a key already under its new name wins."""
-    if not isinstance(d, dict):
-        return d
-    out = {k: v for k, v in d.items() if k not in names}
-    for old, new in names.items():
-        if old in d:
-            out.setdefault(new, d[old])
-    return out
-
-
-def modern_recipe(r):
-    """A recipe with the current spelling of its `size` and `post` keys."""
-    r = dict(r)
-    if isinstance(r.get("size"), dict):
-        r["size"] = rename_keys(r["size"], RECIPE_SIZE)
-    if isinstance(r.get("post"), list):
-        r["post"] = [rename_keys(s, RECIPE_POST) for s in r["post"]]
-    return r
-
-
 def load(path, resolve_recipes=True):
-    b = rename_keys(_fix_bool_keys(yaml.safe_load(open(path, encoding="utf8"))), RENAMED)
-    for block, names in RENAMED_IN.items():
-        if isinstance(b.get(block), dict):
-            b[block] = rename_keys(b[block], names)
+    b = _fix_bool_keys(yaml.safe_load(open(path, encoding="utf8")))
     b["_dir"] = os.path.dirname(os.path.abspath(path))
     b["_url_sha"] = {}
     if resolve_recipes:
@@ -74,11 +40,10 @@ def load(path, resolve_recipes=True):
     return b
 
 
-def max_price(b):
-    """The most one full run may spend, in USD: `budget.maxPrice` (the Model Router's name for a price
-    ceiling). `budget.max_usd`, the older spelling, still works."""
-    budget = b.get("budget") or {}
-    return budget.get("maxPrice", budget.get("max_usd"))  # the older name too: not every bench comes through load()
+def maxSpend(b):
+    """The most one full run may spend, in USD: `budget.maxSpend`. It is the allowance for the whole
+    run; the Model Router's `maxPrice` (inside a recipe's `routing`) is a ceiling for one request."""
+    return (b.get("budget") or {}).get("maxSpend")
 
 
 def stem(path):
@@ -160,7 +125,7 @@ def resolve(value, ctx):
         m = re.fullmatch(r"(width|height)(?:_(\d+))?(?:_max(\d+))?", attr)
         if not m:
             raise ValueError(f"Unknown placeholder {value}")
-        size = rename_keys(dict(ctx["recipe"].get("size", {})), RECIPE_SIZE)
+        size = dict(ctx["recipe"].get("size", {}))
         if m.group(2):
             size["multiple"] = int(m.group(2))
         if m.group(3):
@@ -207,7 +172,7 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
     """One job per (input, recipe, seed). Smoke round: first input (unless chosen), first seed."""
     inputs = [i for i in b["inputs"] if not only_inputs or stem(i["path"]) in only_inputs]
     recipes = [r for r in b["recipes"] if not only_recipes or r["id"] in only_recipes]
-    cap = b.get("maxModels", b.get("max_models"))
+    cap = b.get("maxModels")
     models = sorted({r["model"] for r in recipes} - {ROUTER})
     if cap and len(models) > cap:
         raise ValueError(f"{len(models)} models selected but maxModels is {cap}: choose which {cap} to test "

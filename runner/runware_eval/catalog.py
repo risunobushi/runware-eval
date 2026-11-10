@@ -35,7 +35,7 @@ def _load(path, source):
 def dirs(b=None):
     out = []
     if b is not None:
-        for d in b.get("metricDirs") or b.get("metric_dirs") or ["metrics"]:
+        for d in b.get("metricDirs") or ["metrics"]:
             out.append((os.path.join(b["_dir"], d), "bench" if d == "metrics" else f"shared:{d}"))
     out.append((LIBRARY, "library"))
     return out

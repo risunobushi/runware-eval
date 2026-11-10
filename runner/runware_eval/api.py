@@ -193,13 +193,11 @@ def listed_price(air):
 
 
 def recipe_price(recipe):
-    """Price per output for a recipe with no measured runs: its `price` field in USD (`price_usd`, the
-    older spelling, still works), else the first `$x`
+    """Price per output for a recipe with no measured runs: its `price` field in USD, else the first `$x`
     in its notes (written by whoever set the recipe up, tier-specific), else the highest price in the
     model's schema."""
-    for key in ("price", "price_usd"):
-        if isinstance(recipe.get(key), (int, float)) and not isinstance(recipe.get(key), bool):
-            return float(recipe[key])
+    if isinstance(recipe.get("price"), (int, float)) and not isinstance(recipe.get("price"), bool):
+        return float(recipe["price"])
     if recipe.get("model") == "auto":
         # the router's pick is not known before the call: the price ceiling is the estimate
         cap = (recipe.get("routing") or {}).get("maxPrice")

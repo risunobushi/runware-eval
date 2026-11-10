@@ -15,19 +15,18 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `evaluate` | The dimensions the user chose. Per dimension: `metrics` (ids from `metrics.md`). A metric with a limit (`min`, `max`, `max_px`, `abs_max`, `mean_max`, `p95_max`, `dL_min`, `dL_max`, `aspect_tolerance`) is a pass/fail check; one without is measured only. Both count in the report: recipes are sorted by failed checks, then by average place on the measurements, then by cost. No `mode` is needed (a dimension-wide `mode: gate` or `mode: rank` from older benches still works). |
 | `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `estimate` and `run` warn about a requirement nothing measures or that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
 | `calibration` | For judge or aesthetic metrics: how many outputs the user labels. |
-| `budget` | `maxPrice`: the most one full run may spend, in USD. The runner refuses to start above it. Same name as the Model Router's price ceiling, but for the whole run, not one request (`max_usd`, the older spelling, still works). |
+| `budget` | `maxSpend`: the most one full run may spend, in USD. The runner refuses to start above it. Not the Model Router's `maxPrice`, which is a ceiling for one request. |
 | `seeds` | Seeds per recipe in the full run (default `[1, 2, 3]`); the smoke round uses the first. |
-| `passRule` | How seeds decide a check, per input: `majority` (default), `all`, `any`. A recipe must pass on every input. (`pass_rule`, the older spelling, still works.) |
-| `maxModels` | Most distinct models the bench may run (e.g. 3 or 5). The runner refuses more. (`max_models`, the older spelling, still works.) |
+| `passRule` | How seeds decide a check, per input: `majority` (default), `all`, `any`. A recipe must pass on every input. |
+| `maxModels` | Most distinct models the bench may run (e.g. 3 or 5). The runner refuses more. |
 | `recipes` | Ids of recipe files to run (or `all`). Each file: `id`, `model` (AIR), `params` (exact schema field names), optional `size` and `mask`, `notes` (every convention translated). |
 
 ## Names shared with the Model Router
 
 Where a bench field means the same thing as a field of Runware's Model Router (`model: auto`), it has
 the router's name, and the bench's and recipes' own settings follow its camelCase style (`maxModels`, `passRule`,
-`recipeDirs`, `judgeWhen`, `maxSide`). Older snake_case spellings (`max_models`, `max_usd`, `price_usd`,
-`max_side` ...) still load, and a recipe keeps its fingerprint under either spelling. Metric options
-and limits (`mean_max`, `max_px` ...) are unchanged. Shared names: `maxPrice` for a price ceiling in USD, `routing` and its keys in a router recipe,
+`recipeDirs`, `judgeWhen`, `maxSide`). Metric options and limits (`mean_max`, `max_px` ...) keep their
+own spelling. Shared names: `maxPrice` for a price ceiling on one request in USD (inside `routing`), `routing` and its keys in a router recipe,
 and **quality, speed and cost** for what is compared (the checks you choose are the quality; speed is
 seconds from request to result; cost is USD per output). `requirements` here is the list of what the
 brief asks with the checks that measure it; the router's `routing.requirements` is one sentence it
@@ -194,7 +193,7 @@ evaluate:
       - { id: pairwise_human }
 
 calibration: { labelCount: 8 }
-budget: { maxPrice: 5.00 }
+budget: { maxSpend: 5.00 }
 seeds: [1, 2]
 
 recipes:

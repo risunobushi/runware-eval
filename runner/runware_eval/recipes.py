@@ -16,17 +16,19 @@ import yaml
 
 FP_KEYS = ("taskType", "model", "params", "size", "mask", "then", "post", "routing")
 FP_LINE = re.compile(r"^fingerprint:.*$", re.M)
+# The hash was first defined over these key names. They are only hashed, never read from a file: a
+# recipe's fingerprint, and the results stored under it, stayed the same when the settings were renamed.
+FP_HASHED_AS = {"maxSide": "max_side", "maxMp": "max_mp", "transferDetail": "transfer_detail",
+                "sigmaPx": "sigma_px", "featherPx": "feather_px"}
 
 
 def fingerprint(r):
-    """Hashed over the older spelling of `size` and `post` keys, so a recipe keeps its fingerprint (and
-    its past results) whether its file says `max_mp` or `maxMp`."""
-    from .bench import RECIPE_POST, RECIPE_SIZE, rename_keys
+    hashed = lambda d: {FP_HASHED_AS.get(k, k): v for k, v in d.items()} if isinstance(d, dict) else d
     core = {k: r[k] for k in FP_KEYS if k in r}
-    if isinstance(core.get("size"), dict):
-        core["size"] = rename_keys(core["size"], {new: old for old, new in RECIPE_SIZE.items()})
+    if "size" in core:
+        core["size"] = hashed(core["size"])
     if isinstance(core.get("post"), list):
-        core["post"] = [rename_keys(s, {new: old for old, new in RECIPE_POST.items()}) for s in core["post"]]
+        core["post"] = [hashed(s) for s in core["post"]]
     core.setdefault("taskType", "imageInference")
     return hashlib.sha256(json.dumps(core, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
@@ -39,12 +41,11 @@ def slots(r):
 
 
 def dirs(b):
-    return [os.path.join(b["_dir"], d) for d in (b.get("recipeDirs") or b.get("recipe_dirs") or ["recipes"])]
+    return [os.path.join(b["_dir"], d) for d in (b.get("recipeDirs") or ["recipes"])]
 
 
 def load_file(path):
-    from .bench import modern_recipe
-    r = modern_recipe(yaml.safe_load(open(path, encoding="utf8")))
+    r = yaml.safe_load(open(path, encoding="utf8"))
     r["_file"] = path
     fp = fingerprint(r)
     if r.get("fingerprint") != fp:
@@ -84,8 +85,7 @@ def resolve_bench(b):
                     raise ValueError(f"Recipe '{x}' not found in {', '.join(dirs(b))}")
                 chosen.append(cat[x])
             else:
-                from .bench import modern_recipe
-                chosen.append({**modern_recipe(x), "_fp": fingerprint(x)})
+                chosen.append({**x, "_fp": fingerprint(x)})
     media = {k for k, v in b.items() if isinstance(v, dict) and "path" in v}
     builtin = {"input", "seed", "mask", "judges", "prev"}
     for r in chosen:

@@ -105,7 +105,7 @@ class Pair:
 def copied_regions(recipe):
     """Regions a recipe copies from the original in a post step: pixel similarity there is by construction."""
     return {list(s.values())[0] for s in (recipe or {}).get("post") or []
-            if any(k in s for k in ("restore", "transferDetail", "transfer_detail"))}
+            if any(k in s for k in ("restore", "transferDetail"))}
 # ---------- gates ----------
 
 def check(vals, opt):
@@ -296,7 +296,7 @@ def pixel_fails(metrics):
 OUT_RE = re.compile(r"(.+?)__(.+?)__s(\d+)\.\w+$")
 
 
-def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
+def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
     """Score every output file in out_dir. Uses results.jsonl for cost and latency when present."""
     ops = {r["file"]: r for r in (results or []) if r.get("status") == "success" and r.get("file")}
     inputs = {stem(i["path"]): i for i in b["inputs"]}
@@ -314,8 +314,7 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
         except judge_mod.api.RunwareError:
             panel.offline = True
             log("No Runware login: vision judges use cached answers only; new questions are skipped.")
-    when = b.get("judgeWhen") or b.get("judge_when") or {}
-    max_failed = when.get("maxFailedChecks", when.get("max_failed_checks", 1))
+    max_failed = (b.get("judgeWhen") or {}).get("maxFailedChecks", 1)
     recipes_by_id = {r["id"]: r for r in b.get("recipes") or [] if isinstance(r, dict)}
     scored, pending = [], []
     for f in files:
@@ -408,8 +407,8 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
                     for r in (results or []) if not r.get("reused_from"))
         log(f"Vision judges: {len(pending)} output(s) passed the pixel funnel (at most {max_failed} failed "
             f"check(s)); up to {calls} calls, about ${projected:.2f} (cached answers are free).")
-        if max_usd is not None and spent + projected > max_usd:
-            log(f"Skipping vision judges: ${spent + projected:.2f} would exceed the ${max_usd:.2f} cap.")
+        if maxSpend is not None and spent + projected > maxSpend:
+            log(f"Skipping vision judges: ${spent + projected:.2f} would exceed the ${maxSpend:.2f} cap.")
             for items, _ in pending:
                 for row, _ in items:
                     row.update(status="not_run", note="skipped: budget cap")

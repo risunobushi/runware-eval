@@ -52,21 +52,17 @@ except ValueError as err:
 
 b["maxModels"] = 2
 check("the router does not count towards maxModels", len(bench.jobs(b, "full")) == 9)
-del b["maxModels"]
-b["max_models"] = 1
+b["maxModels"] = 1
 try:
     bench.jobs(b, "full")
-    check("max_models, the older spelling, still limits", False)
+    check("maxModels limits the named models", False)
 except ValueError as err:
-    check("max_models, the older spelling, still limits", "maxModels is 1" in str(err))
-del b["max_models"]
-import yaml
-p = os.path.join(tempfile.mkdtemp(), "bench.yaml")
-yaml.safe_dump({"goal": "g", "inputs": [], "max_models": 3, "pass_rule": "all", "recipes": []}, open(p, "w"))
-loaded = bench.load(p, resolve_recipes=False)
-check("older spellings are renamed on load", (loaded.get("maxModels"), loaded.get("passRule")) == (3, "all")
-      and "max_models" not in loaded and "pass_rule" not in loaded)
+    check("maxModels limits the named models", "maxModels is 1" in str(err))
+del b["maxModels"]
 
+check("a fingerprint from before the settings were renamed still holds", recipes.fingerprint(
+    {"model": "x:1@1", "params": {"a": 1}, "size": {"multiple": 16, "maxMp": 4.0},
+     "post": [{"transferDetail": "logo", "sigmaPx": 6, "featherPx": 6}]}) == "7c72a1950bcf7381")
 check("routing changes the fingerprint",
       recipes.fingerprint(router) != recipes.fingerprint({**router, "routing": {"allowedModels": "bench"}}))
 check("a recipe without routing keeps its fingerprint", recipes.fingerprint(
@@ -86,9 +82,9 @@ run.api.run_task = lambda task, **kw: {"status": "success", "imageURL": "http://
                                        "latency_s": 1.0, "taskUUID": task["taskUUID"],
                                        "model": next(picks) if task["model"] == "auto" else task["model"]}
 d = tempfile.mkdtemp()
-rows = run.execute(jobs, d, max_usd=1, workers=1, log=lambda *a: None)
+rows = run.execute(jobs, d, maxSpend=1, workers=1, log=lambda *a: None)
 check("the pick is recorded per call", [r.get("picked_model") for r in rows] == ["x:1@1", "y:2@1", "x:1@1"])
-named_rows = run.execute([j for j in bench.jobs(b, "full") if j["recipe"] == "one"], tempfile.mkdtemp(), max_usd=1,
+named_rows = run.execute([j for j in bench.jobs(b, "full") if j["recipe"] == "one"], tempfile.mkdtemp(), maxSpend=1,
                          log=lambda *a: None)
 check("named recipes record no pick", all("picked_model" not in r for r in named_rows))
 

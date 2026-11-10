@@ -33,7 +33,7 @@ def fake_run(task, **kw):
     return {"status": "success", "videoURL": "http://x/a.mp4", "cost": 0.06, "latency_s": 1.0, "taskUUID": task["taskUUID"]}
 run.api.run_task = fake_run
 d = tempfile.mkdtemp()
-rows = run.execute([job(i) for i in range(20)], d, max_usd=0.50, log=lambda *a: None)
+rows = run.execute([job(i) for i in range(20)], d, maxSpend=0.50, log=lambda *a: None)
 spend = sum(r.get("cost") or 0 for r in rows)
 check("cap holds when real cost is 3x the estimate", spend <= 0.50 + 1e-9, f"spent ${spend:.2f} of $0.50, {len(sent)} of 20 sent")
 check("tasks that did not start are recorded", sum(1 for r in rows if r.get("not_started")) == 20 - len(sent))
@@ -42,7 +42,7 @@ sent.clear()
 jobs2 = [job(i, "cheap") for i in range(6)] + [job(i, "dear") for i in range(6)]
 run.api.run_task = lambda task, **kw: (sent.append(task["taskUUID"]), time.sleep(0.02), {"status": "success", "videoURL": "http://x/a.mp4",
     "cost": 0.5 if "dear" in task["taskUUID"] else 0.01, "latency_s": 1.0})[2]
-rows = run.execute(jobs2, tempfile.mkdtemp(), max_usd=1.20, log=lambda *a: None)
+rows = run.execute(jobs2, tempfile.mkdtemp(), maxSpend=1.20, log=lambda *a: None)
 spend = sum(r.get("cost") or 0 for r in rows)
 check("two recipes, one 25x its estimate: cap holds, cheap one completes", spend <= 1.20 + 1e-9 and sum(1 for u in sent if "cheap" in u) == 6, f"spent ${spend:.2f} of $1.20")
 run.api.run_task = fake_run
@@ -50,16 +50,14 @@ run.api.run_task = fake_run
 # 2. unknown price stops the run
 run.estimate = lambda jobs, results: [{**j, "est_cost": None, "est_source": "test"} for j in jobs]
 try:
-    run.execute([job(0, "nop")], tempfile.mkdtemp(), max_usd=1, log=lambda *a: None)
+    run.execute([job(0, "nop")], tempfile.mkdtemp(), maxSpend=1, log=lambda *a: None)
     check("unknown price stops the run", False)
 except SystemExit as e:
     check("unknown price stops the run", "`price:" in str(e))
 check("price is read from the recipe", api.recipe_price({"price": 0.4, "notes": "saves $9", "model": "x"}) == 0.4)
-check("price_usd, the older spelling, still works", api.recipe_price({"price_usd": 0.4, "notes": "saves $9", "model": "x"}) == 0.4)
 from runware_eval import bench as _bench
-check("budget.maxPrice is the run's cap", _bench.max_price({"budget": {"maxPrice": 3}}) == 3)
-check("budget.max_usd, the older spelling, still works", _bench.max_price({"budget": {"max_usd": 2}}) == 2)
-check("no budget, no cap", _bench.max_price({}) is None)
+check("budget.maxSpend is the run's cap", _bench.maxSpend({"budget": {"maxSpend": 3}}) == 3)
+check("no budget, no cap", _bench.maxSpend({}) is None)
 run.estimate = lambda jobs, results: [{**j, "est_cost": 0.02, "est_source": "test"} for j in jobs]
 
 # 3. interrupted run: the task was sent, the process died before the result was saved
@@ -72,7 +70,7 @@ def fake_poll_ready(uid, max_wait=0, **kw):
     polled.append(uid)
     return {"status": "success", "videoURL": "http://x/a.mp4", "cost": 0.30, "taskUUID": uid}
 run.api.poll_task = fake_poll_ready
-rows = run.execute([j], d, max_usd=5, log=lambda *a: None)
+rows = run.execute([j], d, maxSpend=5, log=lambda *a: None)
 check("re-run fetches the earlier task instead of sending again", sent == [] and polled == ["u-first"] and rows[-1]["status"] == "success"
       and rows[-1]["taskUUID"] == "u-first" and rows[-1].get("resumed"))
 
@@ -81,14 +79,14 @@ d = tempfile.mkdtemp()
 sent.clear()
 run.Journal(d).record(j["hash"], "u-first")
 run.api.poll_task = lambda uid, max_wait=0, **kw: {"status": "error", "error": "timed out", "pending": True}
-rows = run.execute([j], d, max_usd=5, log=lambda *a: None)
+rows = run.execute([j], d, maxSpend=5, log=lambda *a: None)
 check("still running and recent: not sent again", sent == [] and rows[-1]["status"] == "error" and "not sent again" in rows[-1]["error"])
 
 # 5. earlier task older than the grace period and no result: send anew
 d = tempfile.mkdtemp()
 sent.clear()
 open(os.path.join(d, "submitted.jsonl"), "w").write(json.dumps({"key": j["hash"], "taskUUID": "u-old", "ts": time.time() - 7200}) + "\n")
-rows = run.execute([j], d, max_usd=5, log=lambda *a: None)
+rows = run.execute([j], d, maxSpend=5, log=lambda *a: None)
 check("older than the grace period: sent anew, once", sent == ["u-vid-1"] and rows[-1]["status"] == "success")
 last = [json.loads(l) for l in open(os.path.join(d, "submitted.jsonl"))][-1]
 check("the new submission is journaled", last["taskUUID"] == "u-vid-1")
@@ -98,7 +96,7 @@ d = tempfile.mkdtemp()
 sent.clear()
 run.Journal(d).record(j["hash"], "u-first")
 run.api.poll_task = lambda uid, max_wait=0, **kw: {"status": "error", "error": "provider error"}
-rows = run.execute([j], d, max_usd=5, log=lambda *a: None)
+rows = run.execute([j], d, maxSpend=5, log=lambda *a: None)
 check("earlier task failed: sent anew", sent == ["u-vid-1"])
 
 # 7. api.poll_task against a fake transport

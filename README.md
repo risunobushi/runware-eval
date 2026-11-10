@@ -79,7 +79,7 @@ random pairs, with recipe names hidden. Labels stay in your browser; agreement w
 threshold that would agree best and your own ranking are computed in the page as you click. "Export
 labels.json" hands them to `runware-eval calibrate` or to a colleague, who can import them.
 
-**Spend.** `budget.maxPrice` (USD for one full run) is required. A run stops before it starts if the estimate passes the cap,
+**Spend.** `budget.maxSpend` (USD for one full run) is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its
 own estimate still fit, and a recipe that costs more than estimated is reserved at its real cost from
 then on. Tasks that did not start are listed in the report; raise the cap and run again to fill them

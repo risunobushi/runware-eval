@@ -171,32 +171,32 @@ def reuse(j, src_dir, src, out_dir):
     return row
 
 
-def restore(cur_path, inp_path, region, feather_px, out_path):
+def restore(cur_path, inp_path, region, featherPx, out_path):
     """Paste the original pixels of `region` back over the output, with a soft edge (no API call)."""
     orig = Image.open(inp_path).convert("RGB")
     W, H = orig.size
     cur = Image.open(cur_path).convert("RGB").resize((W, H), Image.BICUBIC)
     a = region.astype(np.float32)
-    if feather_px:
-        k = int(feather_px) * 2 + 1
-        a = cv2.GaussianBlur(a, (k, k), feather_px / 2)
+    if featherPx:
+        k = int(featherPx) * 2 + 1
+        a = cv2.GaussianBlur(a, (k, k), featherPx / 2)
     a = a[..., None]
     comp = a * np.asarray(orig, np.float32) + (1 - a) * np.asarray(cur, np.float32)
     Image.fromarray(np.clip(comp, 0, 255).astype(np.uint8)).save(out_path)
     return out_path
 
 
-def transfer_detail(cur_path, inp_path, region, sigma_px, feather_px, out_path):
+def transfer_detail(cur_path, inp_path, region, sigmaPx, featherPx, out_path):
     """Frequency separation: inside `region`, keep the output's lighting (low frequencies) and put back
     the original's fine detail (high frequencies: lettering, stitching). Local, no API call."""
     orig = np.asarray(Image.open(inp_path).convert("RGB"), np.float32)
     H, W = orig.shape[:2]
     cur = np.asarray(Image.open(cur_path).convert("RGB").resize((W, H), Image.BICUBIC), np.float32)
-    blur = lambda x: cv2.GaussianBlur(x, (0, 0), sigma_px)
+    blur = lambda x: cv2.GaussianBlur(x, (0, 0), sigmaPx)
     detail = blur(cur) + (orig - blur(orig))
     a = region.astype(np.float32)
-    if feather_px:
-        a = cv2.GaussianBlur(a, (0, 0), feather_px / 2)
+    if featherPx:
+        a = cv2.GaussianBlur(a, (0, 0), featherPx / 2)
     a = a[..., None]
     comp = a * detail + (1 - a) * cur
     Image.fromarray(np.clip(comp, 0, 255).astype(np.uint8)).save(out_path)
@@ -278,7 +278,7 @@ def run_pipeline(j, b, out_dir, bases, lock_path, journal=None):
     return row
 
 
-def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=None, lock_path=None):
+def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=None, lock_path=None):
     os.makedirs(os.path.join(out_dir, "masks"), exist_ok=True)
     results = read_results(out_dir)
     done = {r["hash"] for r in results if r.get("status") == "success"
@@ -300,15 +300,15 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
     unknown = [e["recipe"] for e in est if e["est_cost"] is None]
     projected = sum(e["est_cost"] or 0 for e in est)
     log(f"{len(jobs) - len(todo)} cached, {len(todo)} to run. Spent so far ${spent:.3f}, "
-        f"projected ${projected:.3f}, cap ${max_usd:.2f}.")
+        f"projected ${projected:.3f}, cap ${maxSpend:.2f}.")
     if unknown:
         raise SystemExit(f"Stopped: no price known for {', '.join(sorted(set(unknown)))}. Add `price: <USD per "
                          "output>` to the recipe file (it does not change the fingerprint), so the cap can hold. "
                          "For a `model: auto` recipe, `routing.maxPrice` does the same and also binds the router.")
-    if spent + projected > max_usd:
-        raise SystemExit(f"Stopped: ${spent + projected:.3f} would exceed the ${max_usd:.2f} cap. "
-                         "Raise budget.maxPrice in bench.yaml or run fewer recipes.")
-    budget = Budget(max_usd, spent, measured={e["recipe"] for e in est if e["est_source"] == "measured"})
+    if spent + projected > maxSpend:
+        raise SystemExit(f"Stopped: ${spent + projected:.3f} would exceed the ${maxSpend:.2f} cap. "
+                         "Raise budget.maxSpend in bench.yaml or run fewer recipes.")
+    budget = Budget(maxSpend, spent, measured={e["recipe"] for e in est if e["est_source"] == "measured"})
     journal = Journal(out_dir)
     est_by = {e["hash"]: e["est_cost"] for e in est}
     ids = ("input", "recipe", "seed", "model", "fp", "hash")
@@ -318,7 +318,7 @@ def execute(jobs, out_dir, max_usd, workers=6, log=print, history_dirs=(), b=Non
         def wrapped(j):
             if not budget.take(j["recipe"], est_by.get(j["hash"])):
                 return {**{k: j.get(k) for k in ids}, "status": "error", "cost": None, "latency_s": None,
-                        "not_started": True, "error": f"not started: it would pass the ${max_usd:.2f} cap "
+                        "not_started": True, "error": f"not started: it would pass the ${maxSpend:.2f} cap "
                                                       f"(${budget.spent:.3f} spent, costs ran above the estimate)"}
             actual = None
             try:

@@ -53,14 +53,14 @@ tell from a read-only check.
 > | `metrics list` or `metrics control` | the checks this bench can use; test them on unchanged inputs |
 > | `recipes list` or `recipes extract` | recipe files and their past runs |
 >
-> Spend is capped by `budget.maxPrice` in `bench.yaml`, and an interrupted run can be run again
+> Spend is capped by `budget.maxSpend` in `bench.yaml`, and an interrupted run can be run again
 > without paying twice.
 
 Do not write a dollar sign directly followed by a digit anywhere in this file: the agent harness
 replaces such tokens with the skill's arguments. Write prices as `0.006 USD`.
 
 **Use the Model Router's words** where they fit, with the user and in `bench.yaml`: quality, speed and
-cost for what is compared, `maxPrice` for a price ceiling, `requirements` for what the result must
+cost for what is compared, `maxPrice` for a price ceiling on one request, `requirements` for what the result must
 meet. A user who has used `model: auto` should not have to learn a second vocabulary.
 
 ## Step 0 — Preflight: Runware CLI and uv, before anything else
@@ -168,7 +168,7 @@ it is how users discover dimensions they had not thought of.
    or should the bench generate them), expected text, reference identity. Do not ask the user to
    choose between "gate" and "rank", and do not use those words with them: every measurement counts
    in the report either way (see Step 2, point 6).
-4. **Budget and size:** the most one full run may spend, in USD (`budget.maxPrice` in `bench.yaml`),
+4. **Budget and size:** the most one full run may spend, in USD (`budget.maxSpend` in `bench.yaml`),
    and the **maximum number of models**
    to test (e.g. 3 or 5; it cuts time and spend). Write it as `maxModels` in `bench.yaml` and
    propose exactly that many in Step 3; the runner refuses more. Seeds: 1 in the smoke round, **3 in
@@ -342,7 +342,7 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    Look at every output for inverted masks, cropping and ignored instructions; fix recipes first.
 3. **Full run:** `uv run --project <runner> runware-eval estimate bench.yaml --round full` (now with measured costs), then, with
    the user's OK, `uv run --project <runner> runware-eval run bench.yaml --round full`. It stops before starting if the projected
-   total would pass `budget.maxPrice`.
+   total would pass `budget.maxSpend`.
 4. **Report:** `uv run --project <runner> runware-eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
    the best recipe and what it still misses, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
    region crops, gallery and all data, in one file. Put your reading of the results (what passed, what

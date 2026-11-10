@@ -53,7 +53,7 @@ def cmd_estimate(a):
     for rid, x in by.items():
         c = f"{x['cost']:.4f}" if x["cost"] is not None else "?"
         print(f"{rid:34} {x['n']:>5} {c:>9}  {x['src']}")
-    cap = bench.max_price(b)
+    cap = bench.maxSpend(b)
     print(f"\n{len(rows)} tasks, about ${total:.3f}" + (f" (cap ${cap:.2f})" if cap else "")
           + ". Masks for scoring add a small amount per output.")
     print("Measured costs come from earlier runs of this bench; otherwise the recipe's own price note, else the "
@@ -62,9 +62,9 @@ def cmd_estimate(a):
 
 def cmd_run(a):
     b, out = setup(a)
-    cap = bench.max_price(b)
+    cap = bench.maxSpend(b)
     if cap is None:
-        sys.exit("bench.yaml has no budget.maxPrice: set a cap before running.")
+        sys.exit("bench.yaml has no budget.maxSpend: set a cap before running.")
     brief_coverage(b)
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
     run.ensure_input_masks(b, out)
@@ -85,7 +85,7 @@ def cmd_score(a, b=None, out=None, results=None):
         run.prepare_offline(b, out)
     data = score.score_all(b, out, results if results is not None else run.read_results(out),
                            judges=not getattr(a, "no_judges", False),
-                           max_usd=bench.max_price(b))
+                           maxSpend=bench.maxSpend(b))
     print(f"Scored {len(data['scored'])} outputs → {os.path.join(out, 'scores.json')}")
     cmd_report(a, b, out)
 
