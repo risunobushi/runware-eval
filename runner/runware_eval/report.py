@@ -306,15 +306,35 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     ab = agg[best]
     price = f" at <em>${ab['cost']:.3f}</em> per output" if ab["cost"] is not None else ""
     missed = [k.split(":", 1)[1] for k, v in ab["verdict"].items() if not v]
+    # Three things are kept apart in this report: measured values (the same for everyone), the verdict
+    # against this bench's thresholds (a judgement for this brief), and the user's own ranking from the
+    # labeling page (their preference). The headline names the second; "Your pick" names the third.
     if passing:
-        headline = f"Best: <em>{e(best)}</em>. Passes every check{price}."
+        headline = f"Best against this brief's checks: <em>{e(best)}</em>. Passes every check{price}."
     else:
-        headline = f"Best: <em>{e(best)}</em>. Passes {ab['checks'] - ab['fails']} of {ab['checks']} checks{price}."
+        headline = (f"Best against this brief's checks: <em>{e(best)}</em>. Passes {ab['checks'] - ab['fails']} "
+                    f"of {ab['checks']}{price}.")
+    cal_file = os.path.join(out_dir, "calibration.json")
+    ranking = (json.load(open(cal_file, encoding="utf8")).get("human_ranking") or {}) if os.path.exists(cal_file) else {}
+    ranking = {r: v for r, v in ranking.items() if r in agg}
+    pick = max(ranking, key=lambda r: ranking[r]["score"]) if ranking else None
+    pick_line = pick_card = ""
+    if pick:
+        pv, pa = ranking[pick], agg[pick]
+        wins = f"{pv['wins']:g} of {pv['games']:g} blind comparisons won"
+        pcost = f", ${pa['cost']:.3f} per output" if pa["cost"] is not None else ""
+        if pick == best:
+            verdict = "the same recipe the checks favour"
+        else:
+            verdict = (f"passes {pa['checks'] - pa['fails']} of {pa['checks']} checks{pcost}. Your eye and this "
+                       f"brief's checks disagree: read the measurements below before choosing")
+        pick_line = (f"<p class='goal'><strong>Your pick: {e(pick)}</strong> ({wins}), {verdict}. "
+                     f"Your labels are your preference, not a threshold for anyone else.</p>")
     controls = data.get("controls", [])
     checks_spend = data.get("judge_cost", 0) + sum(r.get("eval_cost") or 0 for r in data.get("attempted_rows", []))
     out.append("<header class='hero'>"
                f"<div class='kicker'><b>runware-eval</b> · bench report · {date.today()}</div>"
-               f"<h1>{headline}</h1><p class='goal'><strong>{e(title)}</strong> {e(b['goal'].strip())}</p>"
+               f"<h1>{headline}</h1>{pick_line}<p class='goal'><strong>{e(title)}</strong> {e(b['goal'].strip())}</p>"
                f"<div class='meta'><span>{len(agg)} recipes</span><span>{len(in_order)} input(s)</span>"
                f"<span>seed {', '.join(map(str, seeds))}</span><span>{len(scored)} outputs</span>"
                f"<span>generation ${measured:.3f}</span><span>checks ${checks_spend:.3f}</span>"
@@ -333,9 +353,11 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     else:
         second = card("Best still misses", ab["fails"], e(", ".join(missed)))
     out.append("<section aria-label='Summary'><div class='cards'>"
-               + card("Best overall", f"{ab['checks'] - ab['fails']}/{ab['checks']} checks",
+               + card("Best against the checks", f"{ab['checks'] - ab['fails']}/{ab['checks']} checks",
                       f"{e(best)} · {e(recipes.get(best, {}).get('model', ''))}", lit=True)
                + second
+               + (card("Your pick (blind pairs)", f"{ranking[pick]['wins']:g}/{ranking[pick]['games']:g} won",
+                       f"{e(pick)} · {e(recipes.get(pick, {}).get('model', ''))}", lit=True) if pick else "")
                + card("Checks not run", len(not_run), e(", ".join(not_run)) or "all ran")
                + card("Failed tasks", len(errors), e(", ".join(sorted({x["recipe"] for x in errors}))) or "none")
                + "</div></section>")
@@ -375,7 +397,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         cal = json.load(open(cal_path, encoding="utf8"))
         out.append("<section>" + sec_head(
             "Checks vs your labels",
-            f"{cal['labeled']} outputs labeled blind ({cal['good']} good). Balanced agreement: 50% = chance. "
+            f"Your preference, set against this brief's thresholds: it informs your choice and changes "
+            f"nothing for other users. {cal['labeled']} outputs labeled blind ({cal['good']} good). Balanced "
+            f"agreement: 50% = chance. "
             f"{'Few labels: treat suggestions as hints. ' if cal.get('few_labels') else ''}Suggestions are not "
             f"applied to <span class='mono'>bench.yaml</span>."))
         if cal.get("gates"):
@@ -437,6 +461,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     rule_txt = {"majority": "most seeds", "all": "every seed", "any": "at least one seed"}.get(rule, rule)
     out.append("<section>" + sec_head(
                "Checks by recipe",
+               f"The verdict: measured values against the thresholds in <span class='mono'>bench.yaml</span>, "
+               f"which are this brief's judgement and can be changed. "
                f"Pass = passes on {rule_txt} of every input (<span class='mono'>pass_rule: {e(rule)}</span>). "
                "Cells: outputs passed / total. Sorted by failed checks, then cost.")
                + "<div class='tablewrap'><table><thead><tr><th></th><th></th>"
@@ -518,7 +544,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         for m in s["metrics"]:
             if m["label"] not in labels:
                 labels.append(m["label"])
-    out.append("<section>" + sec_head("All measurements") + "<details><summary>Show table</summary><div class='tablewrap' "
+    out.append("<section>" + sec_head("All measurements", "The measured values, before any threshold: the same "
+                                      "for every user and every re-run of the same outputs.") + "<details><summary>Show table</summary><div class='tablewrap' "
                "style='margin-top:12px'><table><thead><tr><th>Input</th><th>Recipe</th><th>Seed</th><th>Native</th>"
                "<th>Cost</th><th>Time</th>" + "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")
     for s in sorted(scored, key=lambda s: (s["input"], order.index(s["recipe"]), s["seed"])):

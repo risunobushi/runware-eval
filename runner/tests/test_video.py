@@ -172,7 +172,7 @@ path = report.build(b, out, None, {})
 html = open(path, encoding="utf8").read()
 check("report: preview clips embedded", html.count("data:video/mp4;base64,") == 9)
 check("report: frame strips embedded", "First, middle and last frame" in html)
-check("report: headline names the clean clip", "Best: <em>pan</em>" in html, html[html.index("<h1>"):html.index("</h1>")][:120])
+check("report: headline names the clean clip", "Best against this brief's checks: <em>pan</em>" in html, html[html.index("<h1>"):html.index("</h1>")][:120])
 print(f"   report {os.path.getsize(path) / 1e6:.1f} MB at {path}")
 
 print("ALL PASS" if ok else "SOME FAILED")

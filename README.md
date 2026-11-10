@@ -63,8 +63,11 @@ embeds a small preview of each clip. Metrics are one file each: a library ships 
 (`runner/runware_eval/metrics_lib/`), a bench adds its own in `metrics/`, and `examples/metrics/` has
 four written for one bench.
 
-The report leads with the best recipe: fewest failed checks, then lowest cost. It names the checks
-that recipe still misses, so "best" never hides a failure.
+The report keeps three things apart. **Measured values** are the same for every user and every re-run.
+The **verdict** ("best against this brief's checks": fewest failed checks, then lowest cost, with the
+checks it still misses named) depends on the thresholds in `bench.yaml`, which are a judgement for one
+brief. **Your pick** appears once you have labeled outputs blind: it is your preference, shown beside
+the verdict and never applied to the bench. When the two disagree, the report says so.
 
 **Spend.** `budget.max_usd` is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its

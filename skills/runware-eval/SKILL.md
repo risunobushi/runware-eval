@@ -286,6 +286,10 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    each check agreed with them, the threshold that would agree best, which rank metrics order their
    good above their bad, and a human ranking (Bradley-Terry). Show the suggestions; change
    `bench.yaml` only with the user's yes. Below about 20 labels, call the suggestions hints.
+   Keep the three layers apart when you report: measured values are shared evidence; pass or fail
+   is this brief's thresholds; labels and rankings are this user's preference. The report shows
+   "Your pick" beside "Best against this brief's checks"; when they disagree, say so and do not
+   pick one for the user.
 
 Vision-model checks run in `score` as the second stage of a funnel: only outputs that fail at most
 `judge_when.max_failed_checks` pixel checks are judged, with one combined call per judge (about

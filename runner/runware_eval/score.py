@@ -163,6 +163,9 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
             row = {"dimension": dim, "mode": spec.get("mode", "gate"), "id": opt["id"], "label": label(opt),
                    "thresholds": {k: v for k, v in opt.items() if k not in (
                        "id", "name", "label", "region", "rule", "on", "judges", "questions", "rubric", "scale")}}
+            legacy = re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
+            if legacy:  # an older `rule: "... >= 3"`: record it as min / max so calibration can read it
+                row["thresholds"].setdefault("min" if legacy.group(1) == ">=" else "max", float(legacy.group(2)))
             if opt["id"] in JUDGED:
                 if pending is None:
                     rows.append({**row, "status": "not_run", "note": "vision judges switched off"})
