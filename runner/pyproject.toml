@@ -12,6 +12,7 @@ dependencies = [
   "scipy",
   "trimesh",
   "pyvista",
+  "imageio-ffmpeg>=0.8.1",
 ]
 
 [project.scripts]

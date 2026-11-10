@@ -14,5 +14,5 @@ META = {
 
 
 def compute(p, opt):
-    a, b = p.region(opt.get("region", "product")), p.region(opt.get("region", "product"), "out")
+    a, b = p.region(opt.get("region", "product")), out_mask(p, opt.get("region", "product"))
     return {"value": float((a & b).sum() / max(1, (a | b).sum()))}

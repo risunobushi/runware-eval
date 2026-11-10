@@ -156,6 +156,9 @@ unchanged output must fail) or `info`. Then:
    itself; a control that goes the wrong way means the metric or its threshold is broken.
 3. Never edit the runner's library to add a bench-specific metric.
 
+Four worked examples of bench-specific metrics (written for a relighting bench) are in the repo's
+`examples/metrics/`: copy one as a starting point.
+
 ## Step 3 — Find candidates in the catalog
 
 These are free, read-only calls: you may start them as soon as the dimensions are confirmed, in
@@ -232,7 +235,7 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    the user's OK, `uv run --project <runner> runware-eval run bench.yaml --round full`. It stops before starting if the projected
    total would pass `budget.max_usd`.
 4. **Report:** `uv run --project <runner> runware-eval report bench.yaml --round full --notes notes.json` rebuilds `report.html`:
-   verdict, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
+   the best recipe and what it still misses, trade-off chart, check-by-check table, before/after slider with a colour-drift heatmap,
    region crops, gallery and all data, in one file. Put your reading of the results (what passed, what
    is misleading, what to change next) in `notes.json` as `findings` and `caveats`. Hand the user the
    report, not loose images.
@@ -248,8 +251,12 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
 Vision-model checks run in `score` as the second stage of a funnel: only outputs that fail at most
 `judge_when.max_failed_checks` pixel checks are judged, with one combined call per judge (about
 $0.006 per judged output; cached; `--no-judges` skips them). When picking metrics in Step 2, give the
-judges only questions no pixel check can answer. Metrics marked `planned` in the
-registry (OCR, human ranking) show as *not run* in the report. Say so; never present them as passed.
+judges only questions no pixel check can answer. 3D outputs (GLB) and video
+outputs (MP4) need nothing extra: the runner renders or reads them into images first, see the 3D and
+video sections of `references/metrics.md`. For video recipes set `taskType: videoInference`, pass the
+start image in `inputs.frameImages`, switch audio and prompt rewriting off, and give `price_usd`
+(video is priced per second). Metrics marked `planned` in the
+registry (OCR) show as *not run* in the report. Say so; never present them as passed.
 
 **Before reporting, check the gates against the outputs.** A gate that every recipe fails, or one that
 passes something visibly wrong (e.g. a hue-only backdrop check passing a black backdrop), is

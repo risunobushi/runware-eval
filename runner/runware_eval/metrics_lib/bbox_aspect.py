@@ -19,4 +19,4 @@ def compute(p, opt):
         ys, xs = np.nonzero(m)
         return (xs.max() - xs.min() + 1) / (ys.max() - ys.min() + 1)
     spec = opt.get("region", "product")
-    return {"value": float(abs(ratio(p.region(spec, "out")) / ratio(p.region(spec)) - 1))}
+    return {"value": float(abs(ratio(out_mask(p, spec)) / ratio(p.region(spec)) - 1))}

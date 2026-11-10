@@ -25,6 +25,12 @@ A metric file is a small Python module with:
     pair.W, pair.H, pair.native size of the input; native size of the output
     pair.boxes                  named boxes of the input
     pair.mesh                   mesh facts for 3D outputs (faces, parts, watertight, texture_px, file_mb), else None
+    pair.m_out                  the output's own product mask, or None when there is none
+    video_flow(pair)            for video outputs: optical flow between consecutive analysis frames, and the grey frames
+    video(pair)                 for video outputs: a dict with `frames` (N, h, w, 3 uint8 RGB, `analysis_fps`
+                                frames per second, longest side 384 px) and the clip's facts (duration,
+                                native_fps, width, height). Raises KeyError for other outputs ('not run').
+                                For a video, pair.rgb_out / lab_out are its first frame.
 `opt` is the metric's entry in bench.yaml (region, thresholds and any options it defines).
 
 Metrics run locally and must not use the network.
@@ -34,13 +40,41 @@ import numpy as np
 from skimage.color import deltaE_ciede2000, rgb2lab
 from skimage.metrics import structural_similarity
 
-__all__ = ["np", "cv2", "rgb2lab", "deltaE_ciede2000", "structural_similarity", "erode", "mesh_value"]
+__all__ = ["np", "cv2", "rgb2lab", "deltaE_ciede2000", "structural_similarity", "erode", "mesh_value", "video",
+           "out_mask", "video_flow"]
 
 
 def erode(mask, pct=0.15):
     """Shrink a mask by `pct` percent of the longest side (keeps anti-aliased edges out of a measurement)."""
     k = max(1, int(round(max(mask.shape) * pct / 100)))
     return cv2.erode(mask.astype(np.uint8), np.ones((2 * k + 1, 2 * k + 1), np.uint8)) > 0
+
+
+def video(pair):
+    """The frame sequence and facts of a video output; raises KeyError for anything else."""
+    v = getattr(pair, "video", None)
+    if not v:
+        raise KeyError("not a video output")
+    return v
+
+
+def video_flow(pair):
+    """Dense optical flow between consecutive analysis frames of a video output: a list of (h, w, 2)
+    arrays in pixels per frame, plus the grey frames. Computed once per output and shared by the
+    video checks that need it."""
+    v = video(pair)
+    if "_flow" not in v:
+        g = [cv2.cvtColor(f, cv2.COLOR_RGB2GRAY) for f in v["frames"]]
+        v["_flow"] = ([cv2.calcOpticalFlowFarneback(a, b, None, 0.5, 3, 21, 3, 5, 1.1, 0) for a, b in zip(g, g[1:])], g)
+    return v["_flow"]
+
+
+def out_mask(pair, spec="product"):
+    """The region as found in the output itself. Raises KeyError when the output has no mask of its own,
+    so a check that compares outlines is reported as not run instead of comparing the input with itself."""
+    if spec == "product" and pair.m_out is None:
+        raise KeyError("no product mask for this output")
+    return pair.region(spec, "out")
 
 
 def mesh_value(pair, key):

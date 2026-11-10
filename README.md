@@ -53,6 +53,14 @@ uv run --project runner runware-eval label     bench.yaml --round full    # blin
 uv run --project runner runware-eval calibrate bench.yaml --round full --labels labels.json
 ```
 
+**Outputs.** Images are scored directly. 3D models (GLB) are rendered to the view that matches the
+input photo; videos (MP4) are read into frames: the first frame is compared with the input, and
+video checks (motion, frozen frames, scene changes, flicker, colour drift, texture stability, sharpness
+over time, black bars) read the whole clip. The report
+embeds a small preview of each clip. Metrics are one file each: a library ships with the runner
+(`runner/runware_eval/metrics_lib/`), a bench adds its own in `metrics/`, and `examples/metrics/` has
+four written for one bench.
+
 The report leads with the best recipe: fewest failed checks, then lowest cost. It names the checks
 that recipe still misses, so "best" never hides a failure.
 

@@ -138,6 +138,31 @@ goes into the report. Mesh checks read the file itself:
 and 3D renders are compared fairly. Tested on the bag: no 3D model reproduced the logo lettering
 (0.02–0.30 vs 0.995 for intact letters), which matched the crops.
 
+## Video outputs (MP4)
+
+The runner reads every video output with a frame adapter (ffmpeg comes with the runner; nothing to
+install). The **first frame** at full size becomes the output image, so every image check above
+compares it with the input: for image-to-video that answers "did it start from my image?". The
+video checks read the whole clip at 8 frames per second, longest side 384 px. The report embeds a
+small preview of each clip and a first / middle / last frame strip.
+
+| id | unit | notes |
+|---|---|---|
+| `video_motion` | % of diagonal / s | mean optical flow; a still clip scores about 0. `min` rejects clips that barely move, `max` ones that move too much |
+| `video_scene_hold` | histogram distance | largest change in the picture's colour make-up within half a second: a cut or a swapped set scores high, motion inside one scene low (real clips: 0.02-0.19 held, 0.60-0.85 swapped) |
+| `video_frozen_frames` | share of clip | how much of the clip does not change at all; also the longest frozen stretch and when the picture first moves |
+| `video_texture_stability` | L* residual | what is left after moving each frame onto the next along the measured motion: boiling or morphing surfaces score high. Cuts and newly revealed sides raise it too, so read it next to `video_scene_hold` |
+| `video_flicker` | L* | brightness jumping back and forth between frames; smooth fades do not count |
+| `video_color_drift` | ΔE2000 | how far the average colour moves from the first frame; ignores where things are, so motion is not drift |
+| `video_sharpness_hold` | × first frame | sharpness of the last quarter vs the first frame; fast motion lowers it honestly, read it next to `video_motion` |
+| `video_letterbox` | share of frame | black bars that stay for the whole clip (fixed-shape models pad other shapes). The runner leaves bars out before every other check; gate with `max: 0` if the clip must have none |
+| `video_duration` | s | also reports frame rate and size; gate it when a model has fixed duration steps |
+
+Limits to say out loud: outline checks (`mask_iou`, `phase_correlation`, `bbox_aspect`) are not run
+on video, because the output has no product mask of its own. Identity in later frames (is it still
+the same product after it turned?) has no pixel check yet: use the frame strip and the labeling
+page. Thresholds for the video checks come from synthetic clips; calibrate them on a labeled run.
+
 ## Ops — always on
 
 | id | unit | source |

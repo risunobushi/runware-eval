@@ -14,6 +14,6 @@ META = {
 
 
 def compute(p, opt):
-    a, b = p.region("product").astype(np.float32), p.region("product", "out").astype(np.float32)
+    a, b = p.region("product").astype(np.float32), out_mask(p).astype(np.float32)
     (dx, dy), _ = cv2.phaseCorrelate(a, b)
     return {"value": float(np.hypot(dx, dy))}

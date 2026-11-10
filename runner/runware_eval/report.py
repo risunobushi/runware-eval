@@ -17,6 +17,7 @@ from .score import Pair, erode, find_mask
 
 e = html.escape
 HEAT_MAX = 10.0
+CLIP_BUDGET_MB = 30  # embedded video previews in one report; beyond it, clips stay as files in the run folder
 # Runware greens to yellow, dark to light: brighter = more colour change (matches .legend-bar in _assets)
 RAMP = np.array([[0x1f, 0x3a, 0x1b], [0x34, 0x5c, 0x2d], [0x6f, 0xbf, 0x5f], [0xaf, 0xff, 0x9f],
                  [0xff, 0xff, 0x7d]]) / 255.0
@@ -51,7 +52,10 @@ function show(){
     document.getElementById('kv').innerHTML = '<dt>No output for this combination.</dt>'; return; }
   ba.querySelector('.after img').src = r.img; ba.querySelector('.tag.r').textContent = cur.recipe;
   document.getElementById('heat').src = r.heat || '';
-  const tp = document.getElementById('turn-panel'); tp.hidden = !r.turn; if (r.turn) document.getElementById('turn').src = r.turn;
+  const tp = document.getElementById('turn-panel'); tp.hidden = !r.turn; if (r.turn) { document.getElementById('turn').src = r.turn;
+    document.getElementById('turn-title').textContent = r.turn_title || 'Views'; }
+  const cp = document.getElementById('clip-panel'), cv = document.getElementById('clip'); cp.hidden = !r.clip;
+  if (r.clip) { if (cv.getAttribute('src') !== r.clip) cv.src = r.clip; } else { cv.pause(); cv.removeAttribute('src'); }
   const co = document.getElementById('crop-out'); if (co) { co.src = r.crop || ''; document.getElementById('crop-out-cap').textContent = cur.recipe; }
   document.getElementById('kv').innerHTML = r.gates.map(g =>
     `<dt>${g.label}</dt><dd class="mono">${g.value}</dd><dd>${chip(g.pass)}</dd>`).join('');
@@ -248,8 +252,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             originals[k]["crop"] = uri(rgb_in[box[1]:box[3], box[0]:box[2]], 360, 90)
             originals[k]["crop_name"] = next(iter(boxes))
     for s in scored:
-        if s.get("view"):  # 3D output: show its rendered front view
-            p = Pair(b, inputs[s["input"]], os.path.join(out_dir, s["view"]), os.path.join(out_dir, s["view_mask"]))
+        if s.get("view"):  # 3D output: its rendered front view. Video output: its first frame
+            p = Pair(b, inputs[s["input"]], os.path.join(out_dir, s["view"]),
+                     os.path.join(out_dir, s["view_mask"]) if s.get("view_mask") else None)
         else:
             f = os.path.join(out_dir, s["file"])
             p = Pair(b, inputs[s["input"]], f, find_mask(out_dir, s["file"], s["recipe"]))
@@ -268,10 +273,26 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         if box:
             it["crop"] = uri(p.rgb_out[box[1]:box[3], box[0]:box[2]], 360, 90)
         if s.get("turntable") and os.path.exists(os.path.join(out_dir, s["turntable"])):
-            it["turn"] = uri(Image.open(os.path.join(out_dir, s["turntable"])).convert("RGB"), 900, 82)
+            it["turn"] = uri(Image.open(os.path.join(out_dir, s["turntable"])).convert("RGB"), 1200, 82)
+            it["turn_title"] = s.get("turn_title")
+        if s.get("clip") and os.path.exists(os.path.join(out_dir, s["clip"])):
+            it["_clip_path"] = os.path.join(out_dir, s["clip"])
         key = f"{s['input']}|{s['recipe']}"
         if key not in items or s["seed"] < items[key]["_seed"]:
             items[key] = {**it, "_seed": s["seed"]}
+
+    # video previews: the first seed of each recipe, embedded while the report stays within the size budget
+    clip_bytes, clips_left_out = 0, 0
+    for it in items.values():
+        path = it.pop("_clip_path", None)
+        if not path:
+            continue
+        size = os.path.getsize(path)
+        if clip_bytes + size > CLIP_BUDGET_MB * 1e6:
+            clips_left_out += 1
+            continue
+        clip_bytes += size
+        it["clip"] = "data:video/mp4;base64," + base64.b64encode(open(path, "rb").read()).decode()
 
     title = b.get("title") or "Which recipe works best?"
     out = [f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
@@ -421,7 +442,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                + "<div class='tablewrap'><table><thead><tr><th></th><th></th>"
                + "".join(f"<th class='grp' colspan='{n}'>{e(d.replace('_', ' '))}</th>" for d, n in groups)
                + "<th></th><th></th></tr><tr><th>#</th><th>Recipe</th>"
-               + "".join(f"<th>{e(c['label'])}</th>" for c in cols) + "<th>$/image</th><th>Time</th></tr></thead><tbody>")
+               + "".join(f"<th>{e(c['label'])}</th>" for c in cols) + "<th>$/output</th><th>Time</th></tr></thead><tbody>")
     for n, rid in enumerate(order, 1):
         a, cells = agg[rid], []
         for c in cols:
@@ -465,8 +486,12 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         out.append(f"<div class='panel'><h3>{e(crop_name.capitalize())}</h3><div class='pair'><figure><img id='crop-in' "
                    "alt='Original crop'><figcaption>original</figcaption></figure><figure><img id='crop-out' "
                    "alt='Output crop'><figcaption id='crop-out-cap'></figcaption></figure></div></div>")
-    out.append("<div class='panel' id='turn-panel' hidden><h3>All around (0°, 90°, 180°, 270°)</h3>"
-               "<img id='turn' alt='Turntable views of the 3D model'></div>")
+    out.append("<div class='panel' id='clip-panel' hidden><h3>Clip</h3><video id='clip' controls loop muted "
+               "playsinline style='width:100%;border-radius:var(--r)'></video>"
+               + (f"<p class='muted' style='font-size:12px'>{clips_left_out} more clip(s) are in the run folder "
+                  "(left out to keep this file small).</p>" if clips_left_out else "") + "</div>")
+    out.append("<div class='panel' id='turn-panel' hidden><h3 id='turn-title'>Views</h3>"
+               "<img id='turn' alt='Views of the output'></div>")
     out.append("<div class='panel'><h3>Checks</h3><dl class='kv' id='kv'></dl></div></div></div></section>")
 
     # gallery

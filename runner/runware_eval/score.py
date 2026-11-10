@@ -21,6 +21,7 @@ from . import catalog
 from . import judge as judge_mod
 from .metric_api import erode  # noqa: F401  (re-exported for report.py and judge.py)
 from . import render as render_mod
+from . import video as video_mod
 from .bench import stem
 
 
@@ -74,6 +75,7 @@ class Pair:
         self.masks_in = {k: load_mask(os.path.join(b["_dir"], v), (self.W, self.H))
                          for k, v in regions.items() if isinstance(v, str) and not v.startswith("auto:")}
         self.m_out = load_mask(out_mask_path, (self.W, self.H)) if out_mask_path else None
+        self.mesh = self.video = None
 
     def region(self, spec, side="in"):
         """`product`, `not(product)`, a box region, or None for the whole frame."""
@@ -287,6 +289,21 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
             view = json.load(open(vjson))
             p = Pair(b, inputs[inp], vpng, vmask)
             p.mesh = view["mesh"]
+        elif video_mod.is_video(f):
+            # frame adapter: the first frame is the output image; video checks read the frame sequence
+            os.makedirs(os.path.join(out_dir, "renders"), exist_ok=True)
+            stem_ = fname.rsplit(".", 1)[0]
+            first = os.path.join(out_dir, "renders", stem_ + "__first.png")
+            vjson = os.path.join(out_dir, "renders", stem_ + "__video.json")
+            if not (os.path.exists(vjson) and os.path.exists(first)
+                    and json.load(open(vjson)).get("adapter") == video_mod.ADAPTER):
+                log(f"  reading {fname}: frames, strip and preview ...")
+                info = video_mod.prepare(f, first, os.path.join(out_dir, "renders", stem_ + "__frames.jpg"),
+                                         os.path.join(out_dir, "renders", stem_ + "__preview.mp4"))
+                json.dump(info, open(vjson, "w"))
+            clip = json.load(open(vjson))
+            p = Pair(b, inputs[inp], first, find_mask(out_dir, fname, recipe))
+            p.video = {**clip, "frames": video_mod.frames(f, bars=clip["bars"])}
         else:
             p = Pair(b, inputs[inp], f, find_mask(out_dir, fname, recipe))
         jobs = [] if panel else None
@@ -313,7 +330,19 @@ def score_all(b, out_dir, results=None, judges=True, max_usd=None, log=print):
             stem_ = fname.rsplit(".", 1)[0]
             entry.update(view=f"renders/{stem_}__front.png", view_mask=f"renders/{stem_}__front_cut.png",
                          turntable=f"renders/{stem_}__turntable.jpg", view_info=view,
+                         turn_title="All around (0°, 90°, 180°, 270°)",
                          native=f"{view['mesh']['faces']:,} faces")
+        if p.video:
+            stem_ = fname.rsplit(".", 1)[0]
+            mask = find_mask(out_dir, fname, recipe)
+            entry.update(view=f"renders/{stem_}__first.png",
+                         view_mask=os.path.relpath(mask, out_dir).replace(os.sep, "/") if mask else None,
+                         turntable=f"renders/{stem_}__frames.jpg", turn_title="First, middle and last frame",
+                         clip=f"renders/{stem_}__preview.mp4" if clip.get("preview") else None,
+                         view_info={k: v for k, v in clip.items()},
+                         native=f"{clip['width']}x{clip['height']} · {clip['duration']:.1f}s"
+                                + (f" · black bars, picture {clip['content_width']}x{clip['content_height']}"
+                                   if clip["bars_share"] else ""))
         scored.append(entry)
     if pending:
         # budget check after the pixel funnel: only outputs that will actually be judged count
