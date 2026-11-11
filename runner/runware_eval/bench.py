@@ -119,6 +119,10 @@ def resolve(value, ctx):
         if token == "input.text":
             raise ValueError(f"$input.text needs a text input (.txt or .md), not {inp['path']}")
         return inp["_url"]
+    if token == "input.base64":
+        # the input file itself, for an endpoint that takes pictures as base64 (a Serverless app)
+        import base64
+        return base64.b64encode(open(os.path.join(ctx["bench"]["_dir"], ctx["input"]["path"]), "rb").read()).decode()
     if token == "seed":
         return ctx["seed"]
     if token == "prev":
@@ -218,6 +222,8 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
                 params = resolve(r.get("params", {}), ctx)
                 task = {"taskType": r.get("taskType", "imageInference"), "model": r["model"], **params,
                         "includeCost": True}
+                if r.get("serverless"):
+                    task["serverless"] = dict(r["serverless"])  # which app and endpoint, and how to read its answer
                 base = content_key(b, task)
                 if r["model"] == ROUTER:
                     if r.get("then") or r.get("post"):

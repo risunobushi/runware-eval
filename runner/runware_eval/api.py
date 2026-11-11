@@ -113,6 +113,8 @@ def run_task(task, poll_every=1.0, max_wait=900):
     """Send one task (async delivery) and poll until a terminal result. Never re-sends a task Runware
     may already have. `latency_s` is send to first successful poll, so it is rounded up to the poll
     interval (1 s for the first 20 s, then growing to 3 s)."""
+    if task.get("taskType") == SERVERLESS:
+        return serverless_run(task, max_wait=max(max_wait, 1800))
     t0 = time.time()
     uid = task["taskUUID"]
     try:
@@ -159,6 +161,73 @@ def _wait(uid, data, errors, t0, poll_every, max_wait):
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "error": f"polling failed: {exc}", "pending": True,
                     "latency_s": round(time.time() - t0, 1)}
+
+
+SERVERLESS = "serverlessEndpoint"   # a recipe that calls the user's own Runware Serverless app
+SERVERLESS_API = "https://api.serverless.runware.ai/v1/apps"
+_NOT_PAYLOAD = ("taskType", "taskUUID", "model", "includeCost", "serverless")
+
+
+def _serverless_http(method, url, body=None, timeout=120):
+    req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), method=method, headers={
+        "Authorization": f"Bearer {api_key()}", "Content-Type": "application/json", "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        text = e.read().decode("utf8", "replace")
+        try:
+            return e.code, json.loads(text)
+        except ValueError:
+            return e.code, {"detail": text[:400]}
+
+
+def serverless_run(task, max_wait=1800):
+    """One call of a Serverless app's endpoint, in the shape `run_task` returns.
+
+    `task["serverless"]` names the app and how to read its answer: `app`, `endpoint`, `imageKey` (the field
+    of the handler's answer that holds the picture as base64; default `image`), `secondsKey` (the field
+    with the GPU seconds the handler measured; default `seconds`) and `gpuPricePerSecond` (USD, from
+    `runware serverless gpus`). Everything else in the task is the endpoint's payload.
+
+    Serverless bills GPU time per worker, not per call, so `cost` here is the handler's GPU seconds times
+    the GPU's rate: what this one output used. A cold start and idle time until the worker scales down are
+    billed too and are not in it. The task's UUID is the Serverless task id, so sending it twice cannot
+    run it twice."""
+    spec, t0 = task.get("serverless") or {}, time.time()
+    root = f"{SERVERLESS_API}/{spec.get('app')}"
+    payload = {k: v for k, v in task.items() if k not in _NOT_PAYLOAD}
+    try:
+        for _ in range(60):
+            code, res = _serverless_http("POST", f"{root}/invoke-async/{spec.get('endpoint')}",
+                                         {"taskId": task["taskUUID"], "payload": payload})
+            if code != 503:  # 503: no capacity yet, and no task was created
+                break
+            time.sleep(15)
+        if code >= 400:
+            return {"status": "error", "error": f"Serverless HTTP {code}: {json.dumps(res)[:300]}", "latency_s": round(time.time() - t0, 1)}
+        while res.get("status") not in ("completed", "failed"):
+            if time.time() - t0 > max_wait:
+                return {"status": "error", "error": f"timed out after {max_wait}s", "latency_s": round(time.time() - t0, 1)}
+            time.sleep(1.5 if time.time() - t0 < 30 else 5)
+            code, new = _serverless_http("GET", f"{root}/tasks/{task['taskUUID']}")
+            if code < 400:
+                res = new
+    except Exception as exc:  # noqa: BLE001  one task's failure must not stop a run
+        return {"status": "error", "error": f"Serverless call failed: {exc}", "latency_s": round(time.time() - t0, 1)}
+    latency = round(time.time() - t0, 1)
+    if res.get("status") == "failed":
+        return {"status": "error", "error": str(res.get("error"))[:400], "latency_s": latency}
+    out = res.get("output")
+    if isinstance(out, dict) and list(out) == ["predictions"] and len(out["predictions"]) == 1:
+        out = out["predictions"][0]  # a code app's answer arrives wrapped
+    image = (out or {}).get(spec.get("imageKey", "image")) if isinstance(out, dict) else None
+    if not isinstance(image, str):
+        return {"status": "error", "error": f"no `{spec.get('imageKey', 'image')}` in the endpoint's answer", "latency_s": latency}
+    secs = out.get(spec.get("secondsKey", "seconds"))
+    rate = spec.get("gpuPricePerSecond")
+    cost = round(secs * rate, 6) if isinstance(secs, (int, float)) and isinstance(rate, (int, float)) else None
+    return {"status": "success", "imageData": image, "cost": cost, "latency_s": latency, "gpu_seconds": secs}
 
 
 def download(url, path):

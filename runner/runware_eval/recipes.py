@@ -14,7 +14,7 @@ import re
 
 import yaml
 
-FP_KEYS = ("taskType", "model", "params", "size", "mask", "then", "post", "routing")
+FP_KEYS = ("taskType", "model", "params", "size", "mask", "then", "post", "routing", "serverless")
 FP_LINE = re.compile(r"^fingerprint:.*$", re.M)
 # The hash was first defined over these key names. They are only hashed, never read from a file: a
 # recipe's fingerprint, and the results stored under it, stayed the same when the settings were renamed.
@@ -87,7 +87,7 @@ def resolve_bench(b):
             else:
                 chosen.append({**x, "_fp": fingerprint(x)})
     media = {k for k, v in b.items() if isinstance(v, dict) and "path" in v}
-    builtin = {"input", "seed", "mask", "judges", "prev"}
+    builtin = {"input", "seed", "mask", "judges", "prev"}  # input also covers $input.base64
     for r in chosen:
         missing = [s for s in slots(r) if s.split(".")[0] not in builtin | media
                    and not (s.startswith("prompts.") and s.split(".", 1)[1] in (b.get("prompts") or {}))]

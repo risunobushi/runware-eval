@@ -83,6 +83,8 @@ def run_once(journal, key, task):
     """Run a task, unless an earlier run already sent the same one: then fetch that result instead.
     If it is still not ready and was sent recently, it is not sent again (that would bill twice)."""
     prev = journal.last.get(key) if journal else None
+    if task.get("taskType") == api.SERVERLESS:
+        prev = None  # a Serverless task is not in Runware's task store: nothing to fetch, it is called again
     if prev:
         age = time.time() - prev["ts"]
         res = api.poll_task(prev["taskUUID"], max_wait=min(300, max(0, GRACE_S - age)))
@@ -441,6 +443,22 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
             files = (res.get("outputs") or {}).get("files") or []
             url = (res.get("imageURL") or res.get("videoURL") or res.get("maskImageURL")
                    or (files[0]["url"] if files else None))
+            if not url and isinstance(res.get("imageData"), str):
+                # a Serverless endpoint answered with the picture itself (base64): there is no URL to keep
+                import base64
+                raw = base64.b64decode(res["imageData"])
+                ext = ".png" if raw[:4] == b"\x89PNG" else ".webp" if raw[8:12] == b"WEBP" else ".jpg"
+                row["file"] = f"{j['input']}__{j['recipe']}__s{j['seed']}{ext}"
+                with open(os.path.join(out_dir, row["file"]), "wb") as f:
+                    f.write(raw)
+                if res.get("gpu_seconds") is not None:
+                    row["gpu_seconds"] = res["gpu_seconds"]
+                try:
+                    row["eval_cost"] = mask_from(data_uri(os.path.join(out_dir, row["file"])),
+                                                 os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
+                except RuntimeError as e:
+                    row["mask_error"] = str(e)
+                return row
             if not url and isinstance(res.get("text"), str):
                 # caption and textInference answer with text, not a file: the text is the output
                 row["file"] = f"{j['input']}__{j['recipe']}__s{j['seed']}.txt"
