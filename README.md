@@ -87,6 +87,20 @@ is sent unless a recipe asks for one, so every draw is a new generation on the m
 whether or not the model has a seed field. A check passes when it passes on most draws. Draws that come
 back as the very same file are called out in the report.
 
+**Parameter check.** Runware runs and bills a request that carries a field it does not know, at the model's
+default. So before `estimate` and `run`, one request per recipe is validated against the model's published
+schema. A field the model does not have (`widht`, with "did you mean `width`?"), a value outside the allowed
+set or range: the run stops before anything is paid. A field the schema calls required, or a rule between
+fields, is printed and does not stop the run, because the published schemas are sometimes stricter than the
+API. `--skip-model-check` turns it off. It cannot see rules the API enforces and the schema does not state.
+
+**Models that change.** The same model id can change between two runs: status, price, a field, a default.
+Each run keeps what Runware publishes about every model in `models.json` and stamps each result with it.
+The next run prints what differs before spending (`status preview → live`, `price output: $0.0154 →
+$0.01926`, `field added: ...`). Cached results from before a change are kept and marked in the report;
+`run --regenerate-changed` makes them again. A model whose weights change while its schema, status and
+price stay the same is not seen.
+
 **Spend.** `budget.maxSpend` (USD for one full run) is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its
 own estimate still fit, and a recipe that costs more than estimated is reserved at its real cost from

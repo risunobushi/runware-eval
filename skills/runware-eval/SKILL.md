@@ -46,7 +46,7 @@ tell from a read-only check.
 >
 > | Command | What it does |
 > |---|---|
-> | `estimate` | cost per recipe, before anything is paid |
+> | `estimate` | cost per recipe, each recipe's parameters checked against its model's schema, and models that changed since the last run; before anything is paid |
 > | `run --round smoke` or `--round full` | generate, score and report |
 > | `score`, `report` | re-score or rebuild the report from saved results; no login needed |
 > | `calibrate --labels <file>` | take labels exported from the report: agreement and suggested thresholds |
@@ -344,6 +344,16 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    earlier runs in that folder, otherwise the highest *listed* price in the model's schema. Runware has
    no reliable dry-run (the `X-Runware-Dry-Run` header executed and billed in testing), so never
    promise a free price check. Show the user the table and get a yes.
+   `estimate` and `run` also print two things, both read from the models' published schemas:
+   - **Parameter check.** Lines marked `x` (a field the model does not have, a value it does not allow)
+     stop `run` before anything is paid: fix the recipe file. Runware would have run and billed the
+     request at the model's default. Lines marked `!` (a field the schema calls required, a rule between
+     fields) do not stop it: the schema is sometimes stricter than the API, so tell the user and let the
+     smoke round decide. Use `--skip-model-check` only when the user confirms the schema is wrong.
+   - **Models that changed since this bench last ran** (status, price, fields, defaults). Read the lines
+     to the user. Cached results from before the change are kept and marked in the report; offer
+     `run --regenerate-changed` (paid) when the change touches what the bench measures. A first run has
+     nothing to compare with and prints nothing.
 2. **Smoke round:** `uv run --project <runner> runware-eval run bench.yaml --round smoke` (first input, first draw, every
    recipe). It records real cost and speed per task, masks every output and writes the report.
    Look at every output for inverted masks, cropping and ignored instructions; fix recipes first.

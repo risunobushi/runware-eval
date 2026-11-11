@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-from . import api, bench, report, run, score
+from . import api, bench, models, report, run, score
 
 
 def common(ap):
@@ -33,6 +33,54 @@ def brief_coverage(b):
         print()
 
 
+def run_dirs(b):
+    root = os.path.join(b["_dir"], "runs")
+    return [os.path.join(root, d) for d in os.listdir(root)] if os.path.isdir(root) else []
+
+
+def model_checks(a, b, out, jobs, paying):
+    """Before anything is paid: each recipe's request against its model's published schema, and each
+    model's published details against what earlier runs of this bench recorded. Returns {model: fingerprint}."""
+    if getattr(a, "skip_model_check", False):
+        return {}
+    problems, unchecked = models.check_jobs(jobs, b)
+    if problems:
+        print("Parameter check (each recipe's request against its model's schema):")
+        for rid, p in problems.items():
+            for line in p["stop"]:
+                print(f"  x {rid}: {line}")
+            for line in p["warn"]:
+                print(f"  ! {rid}: {line} (the schema's rule; the API may still accept it)")
+        print()
+    if unchecked:
+        print(f"Parameters not checked (no published schema found): {', '.join(unchecked)}\n")
+    stops = [rid for rid, p in problems.items() if p["stop"]]
+    if stops and paying:
+        sys.exit(f"Stopped before spending: {', '.join(stops)} send{'s' if len(stops) == 1 else ''} something the model's "
+                 "schema does not allow. Runware runs and bills a request with an unknown field, at the model's default. "
+                 "Fix the recipe file, or pass --skip-model-check if the schema is wrong.")
+    airs = {j["task"]["model"] for j in jobs} | {j["_recipe"]["then"]["model"] for j in jobs if (j.get("_recipe") or {}).get("then")}
+    today, changed = models.changes(airs, run_dirs(b))
+    if changed:
+        print("Models that changed since this bench last ran:")
+        for air, c in changed.items():
+            print(f"  ! {air} (last recorded {c['since']})")
+            for w in c["what"][:8]:
+                print(f"      {w}")
+            if len(c["what"]) > 8:
+                print(f"      and {len(c['what']) - 8} more (see models.json in the run folder)")
+        print()
+    if paying:
+        models.record(out, today, changed)
+        old = models.stale([r for r in run.read_results(out) if r.get("status") == "success"], out)
+        wanted = {j["hash"] for j in jobs}
+        n = sum(h in wanted for h in old)
+        if n and not getattr(a, "regenerate_changed", False):
+            print(f"{n} cached result(s) in this run were generated before their model changed. They are kept and "
+                  "marked in the report; `--regenerate-changed` makes them again (paid).\n")
+    return {air: s["fp"] for air, s in today.items()}
+
+
 def cmd_estimate(a):
     b, out = setup(a)
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
@@ -49,6 +97,7 @@ def cmd_estimate(a):
         x = by.setdefault(r["recipe"], {"n": 0, "cost": r["est_cost"], "src": r["est_source"]})
         x["n"] += 1
     brief_coverage(b)
+    model_checks(a, b, out, jobs, paying=False)
     print(f"{'recipe':34} {'tasks':>5} {'$/task':>9}  source")
     for rid, x in by.items():
         c = f"{x['cost']:.4f}" if x["cost"] is not None else "?"
@@ -70,10 +119,10 @@ def cmd_run(a):
     run.ensure_input_masks(b, out)
     run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
     jobs = bench.jobs(b, a.round, a.inputs, a.recipes)
-    runs_root = os.path.join(b["_dir"], "runs")
-    hist = [os.path.join(runs_root, d) for d in os.listdir(runs_root)] if os.path.isdir(runs_root) else []
-    results = run.execute(jobs, out, cap, history_dirs=hist + (a.history or []), b=b,
-                          lock_path=os.path.join(out, "media.lock.json"))
+    fps = model_checks(a, b, out, jobs, paying=True)
+    results = run.execute(jobs, out, cap, history_dirs=run_dirs(b) + (a.history or []), b=b,
+                          lock_path=os.path.join(out, "media.lock.json"), model_fps=fps,
+                          regenerate=a.regenerate_changed)
     print(f"Done. Results in {out}")
     if not a.no_score:
         cmd_score(a, b, out, results)
@@ -177,6 +226,11 @@ def main():
         if name == "run":
             p.add_argument("--no-score", action="store_true")
             p.add_argument("--history", nargs="*", help="extra run folders to reuse matching results from")
+            p.add_argument("--regenerate-changed", action="store_true",
+                           help="make cached results again when their model's published details changed since")
+        if name in ("estimate", "run"):
+            p.add_argument("--skip-model-check", action="store_true",
+                           help="do not check recipes against the models' schemas, nor record what the models publish")
         if name in ("run", "score"):
             p.add_argument("--no-judges", action="store_true", help="skip the vision-model checks")
         p.set_defaults(fn=fn)

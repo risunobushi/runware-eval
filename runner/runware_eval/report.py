@@ -686,7 +686,17 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         same.setdefault((s["recipe"], s["input"]), []).append(s.get("sha1"))
     same_draws = sorted(f"{rid} on {inp} ({len(v)} draws)" for (rid, inp), v in same.items()
                         if len(v) > 1 and v[0] and len(set(v)) == 1)
-    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial or own_judge or same_draws:
+    from . import models as models_mod
+    old_model = {}  # outputs generated before their model's published details changed
+    try:
+        rows_ = [json.loads(line) for line in open(os.path.join(out_dir, "results.jsonl"), encoding="utf8") if line.strip()]
+    except OSError:
+        rows_ = []
+    for h, st in models_mod.stale([r for r in rows_ if r.get("status") == "success"], out_dir).items():
+        rid = next(r["recipe"] for r in rows_ if r.get("hash") == h)
+        x = old_model.setdefault((st["model"], st["since"], "; ".join(st["what"])), {})
+        x[rid] = x.get(rid, 0) + 1
+    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial or own_judge or same_draws or old_model:
         rows = [note(*split_note(n)) for n in notes.get("findings", [])]
         warns = [note(*split_note(n), warn=True) for n in notes.get("caveats", [])]
         for c in bad_ctl:
@@ -708,6 +718,11 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             warns.append(note("<strong>Draws that are the same output</strong>",
                               f"{e(', '.join(same_draws))}. Every draw came back as the same file, so they count as "
                               "one result: the model does not vary for this request, or the recipe fixes a seed.", True))
+        for (air, since, what), per in old_model.items():
+            warns.append(note(f"<strong>{e(air)} changed after these outputs were made</strong>",
+                              f"{e(', '.join(f'{rid} ({n})' for rid, n in sorted(per.items())))}: generated before {e(since)}, "
+                              f"when the model's published details were seen to change ({e(what)}). They may not be what "
+                              "the model returns today: <code>run --regenerate-changed</code> makes them again.", True))
         if partial:
             warns.append(note("<strong>Fewer outputs than the other recipes</strong>",
                               f"{e(', '.join(partial))}. Their verdicts rest on less evidence.", True))

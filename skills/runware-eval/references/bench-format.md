@@ -93,6 +93,27 @@ same file.
 A recipe's `size` block fits the input to a model's limits: `size: { multiple: 16, maxSide: 2048,
 maxMp: 4.19 }`. Check each schema for its own limits and write them here.
 
+## What is checked before a run
+
+`estimate` and `run` validate one request per recipe (and its `then` step) against the model's published
+JSON Schema, after every placeholder is filled in:
+
+| Finding | Example | Effect |
+|---|---|---|
+| a field the model does not have | `widht: 2048` → "did you mean `width`?" | `run` stops before spending |
+| a value outside the allowed set or range | `width: 8192`, `outputFormat: TIFF` | `run` stops before spending |
+| a field the schema calls required; a rule between fields (`if/then`) | `positivePrompt` missing | printed, the run goes on |
+| no schema published for the model | some caption models | printed as not checked |
+
+`model: auto` recipes are not checked (the router has no schema of its own). `--skip-model-check` turns the
+check off.
+
+Each run folder also keeps `models.json`: per model, what Runware published on the day (status, version,
+prices, every request field with its type, allowed values, range and default). A later run compares and
+prints what changed; results carry `model_fp`, the record they were generated under, so the report can mark
+the ones from before a change. `run --regenerate-changed` makes those again. Results from before this
+record existed carry no stamp and are not marked.
+
 ## Masks as model inputs
 
 A recipe can send a mask to models that take one (`$mask` in `params`):

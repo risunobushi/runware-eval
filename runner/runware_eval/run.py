@@ -348,12 +348,35 @@ def run_pipeline(j, b, out_dir, bases, lock_path, journal=None):
     return row
 
 
-def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=None, lock_path=None):
+def drop_outdated(out_dir, model_fps):
+    """Take results generated under an older model record out of results.jsonl, so they are made again.
+    Rows with no stamp (made before the record existed) are left alone. Returns the dropped rows."""
+    rows = read_results(out_dir)
+    old = [r for r in rows if r.get("model_fp") and model_fps.get(r.get("model")) not in (None, r["model_fp"])]
+    if old:
+        gone = {id(r) for r in old}
+        with open(os.path.join(out_dir, "results.jsonl"), "w", encoding="utf8") as f:
+            for r in rows:
+                if id(r) not in gone:
+                    f.write(json.dumps(r) + "\n")
+    return old
+
+
+def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=None, lock_path=None,
+            model_fps=None, regenerate=False):
+    """`model_fps`: {model: fingerprint of what Runware publishes about it today} (see models.py); every
+    new result is stamped with it. `regenerate`: results stamped with an older fingerprint are made again."""
     os.makedirs(os.path.join(out_dir, "masks"), exist_ok=True)
+    model_fps = model_fps or {}
+    fresh = lambda r: not (regenerate and r.get("model_fp") and model_fps.get(r.get("model")) not in (None, r["model_fp"]))
+    redo = {r["hash"] for r in drop_outdated(out_dir, model_fps)} if regenerate else set()
+    if redo:
+        log(f"Making {len(redo)} result(s) again: their model's published details changed since they were generated.")
     results = read_results(out_dir)
     done = {r["hash"] for r in results if r.get("status") == "success"
             and os.path.exists(os.path.join(out_dir, r["file"]))}
-    past = history([d for d in history_dirs if os.path.abspath(d) != os.path.abspath(out_dir)])
+    past = {h: v for h, v in history([d for d in history_dirs if os.path.abspath(d) != os.path.abspath(out_dir)]).items()
+            if fresh(v[1])}
     reused = 0
     for j in jobs:
         if j["hash"] not in done and j["hash"] in past:
@@ -379,6 +402,9 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
                          "Raise budget.maxSpend in bench.yaml or run fewer recipes.")
     budget = Budget(maxSpend, spent, measured={e["recipe"] for e in est if e["est_source"] == "measured"})
     journal = Journal(out_dir)
+    for h in redo:  # or the earlier task's result would be fetched instead of a new generation
+        journal.last.pop(h, None)
+    stamp = lambda row: {**row, "model_fp": model_fps[row["model"]]} if model_fps.get(row.get("model")) else row
     est_by = {e["hash"]: e["est_cost"] for e in est}
     ids = ("input", "recipe", "seed", "model", "fp", "hash")
     frame_masks = ((b or {}).get("video") or {}).get("masks", True)
@@ -392,7 +418,7 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
                                                       f"(${budget.spent:.3f} spent, costs ran above the estimate)"}
             actual = None
             try:
-                row = fn(j)
+                row = stamp(fn(j))
                 actual = (row.get("spend", row.get("cost")) or 0) + (row.get("eval_cost") or 0)
                 return row
             finally:
