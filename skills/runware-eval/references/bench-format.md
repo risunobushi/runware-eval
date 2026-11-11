@@ -301,8 +301,7 @@ price: 0.0015                       # USD per output, for the estimate
 - The task's id is the Serverless task id, so a retry cannot run a call twice. A worker that scaled to
   zero takes minutes to come back; the runner waits (up to 30 minutes per call).
 
-A worked example (an app that trains a LoRA in resumable slices and serves it, its client, and the
-recipe) is in the repo's `examples/serverless-training/`.
+Writing, training or deploying the app is outside this skill: it benchmarks an endpoint that exists.
 
 ## Multi-step recipes
 

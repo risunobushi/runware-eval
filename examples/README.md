@@ -18,9 +18,3 @@ To use one, copy it into your bench's `metrics/` folder and refer to its `id` in
 write your own, copy one as a starting point: a `META` dict and a `compute(pair, opt)` function,
 following `runner/runware_eval/metric_api.py`. Then run `runware-eval metrics control bench.yaml`:
 a `preserve` metric must pass on an unchanged copy of the input, and a `change` metric must fail.
-
-## `serverless-training/`: train on Runware Serverless, then benchmark what you trained
-
-A Serverless app that trains a LoRA in resumable slices and serves it, a local client, the script that
-turned a bench run into training pairs, and the recipe that put the trained model back into the bench.
-See its `README.md` for the loop and what was measured.

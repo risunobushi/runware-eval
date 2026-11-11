@@ -20,3 +20,7 @@ Thumbs.db
 
 # build leftovers
 build/
+
+# the training side of the Serverless run (app, client, dataset builder): done, kept locally,
+# left out because training is outside this tool's scope
+examples/serverless-training/

@@ -112,9 +112,9 @@ price stay the same is not seen.
 
 **Your own model.** A recipe can call an endpoint of a Runware Serverless app (`taskType: serverlessEndpoint`),
 so a model you trained or deployed is benchmarked next to the catalogue's, with the same checks and its cost
-per output worked out from GPU seconds. `examples/serverless-training/` has the whole loop that was run with
-it: the bench picks a teacher, its outputs become training pairs, a LoRA is trained on Serverless in
-resumable slices, and the trained model goes back into the bench.
+per output worked out from GPU seconds. It was used to put a LoRA trained on Serverless back into the bench
+that picked its teacher. The training side of that run (the app, its client, the dataset builder) is not in
+this repository: the tool is about evaluation, and training is out of its scope.
 
 **Spend.** `budget.maxSpend` (USD for one full run) is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its
