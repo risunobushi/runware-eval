@@ -34,4 +34,4 @@ def compute(pair, opt):
     wide = [dist(hists[i], hists[i + gap]) for i in range(len(hists) - gap)]
     step = [dist(a, b) for a, b in zip(hists, hists[1:])]
     return {"value": max(wide), "cut": max(step), "at_s": float((int(np.argmax(wide)) + gap) / fps),
-            "from_start": dist(hists[0], hists[-1])}
+            "from_start": dist(hists[0], hists[-1]), "series": series(wide, fps, start=gap)}

@@ -49,15 +49,18 @@ metric's file and regenerate. This is the curated library; a bench can add its o
 | `svg_images` | info | vector | deterministic | — | bitmaps lower | library | `5e940a82` |
 | `svg_nodes` | info | vector | deterministic | — | nodes lower | library | `ffa822a3` |
 | `svg_shapes` | info | vector | deterministic | — | shapes lower | library | `f240d097` |
-| `video_color_drift` | preserve | video | deterministic | video | ΔE2000 lower | library | `0d466561` |
+| `video_color_drift` | preserve | video | deterministic | video | ΔE2000 lower | library | `45d46b77` |
 | `video_duration` | info | video | deterministic | video | s  | library | `2a1e88cd` |
-| `video_flicker` | info | video | deterministic | video | L* lower | library | `71ce71a4` |
+| `video_flicker` | info | video | deterministic | video | L* lower | library | `a5dbc74f` |
 | `video_frozen_frames` | info | video | deterministic | video | share of clip lower | library | `cb6e6f34` |
 | `video_letterbox` | info | video | deterministic | video | share of frame lower | library | `3df76304` |
-| `video_motion` | change | video | deterministic | video | % of diagonal / s higher | library | `25a07c68` |
-| `video_scene_hold` | preserve | video | deterministic | video | histogram distance lower | library | `8f84df94` |
-| `video_sharpness_hold` | info | video | deterministic | video | × first frame higher | library | `232b6671` |
-| `video_texture_stability` | info | video | deterministic | video | L* residual lower | library | `f3d68cbf` |
+| `video_motion` | change | video | deterministic | video | % of diagonal / s higher | library | `8bcfb71f` |
+| `video_outline_hold` | preserve | video | deterministic | video, reference, region | IoU higher | library | `18bdef48` |
+| `video_product_area` | info | video | deterministic | video, reference, region | × input area  | library | `fa17950f` |
+| `video_product_drift` | preserve | video | deterministic | video, reference, region | histogram distance lower | library | `db0ee2b2` |
+| `video_scene_hold` | preserve | video | deterministic | video | histogram distance lower | library | `bb3426bb` |
+| `video_sharpness_hold` | info | video | deterministic | video | × first frame higher | library | `a39b0390` |
+| `video_texture_stability` | info | video | deterministic | video | L* residual lower | library | `c51746af` |
 
 - **`alpha_edge_softness`**: Width of the cut-out's semi-transparent edge, in pixels at the input's size: about 0 is a hard, jagged edge, 1 to 3 a clean anti-aliased one, more a soft matte (hair, fur, glass) or a halo. No better direction on its own.
 - **`alpha_opacity`**: How solid the cut-out is inside the reference region, away from its edge: mean alpha, 1 = fully opaque. Below about 0.99 the subject itself was left partly see-through (the new background will show through it). Also reports the share of pixels under 90% opacity.
@@ -109,6 +112,9 @@ metric's file and regenerate. This is the curated library; a bench can add its o
 - **`video_frozen_frames`**: Share of a video in which the picture does not change at all (0 = always changing, 1 = a still image).
 - **`video_letterbox`**: Black bars in a video: share of the frame taken by bars that stay black for the whole clip (0 = none).
 - **`video_motion`**: How much moves in a video: mean optical flow, in percent of the frame diagonal per second. A still clip scores about 0.
+- **`video_outline_hold`**: Does the product keep its outline through a video? Lowest overlap (IoU) between its outline in the sample frames and in the input.
+- **`video_product_area`**: Does the product stay in the picture? Its smallest area in the sample frames of a video, relative to its area in the input (1.0 = same size).
+- **`video_product_drift`**: Is it still the same product later in the video? Largest change in the colour make-up of the product, frame outline against the input's (0 = same colours, 1 = nothing in common).
 - **`video_scene_hold`**: Does a video stay in one scene? Largest change in the picture's colour make-up within half a second (0 = same scene, 1 = nothing in common).
 - **`video_sharpness_hold`**: Does a video stay sharp? Sharpness of its last quarter relative to its first frame (1.0 = as sharp).
 - **`video_texture_stability`**: Do surfaces hold still as they move? What is left when each frame is moved onto the next along the measured motion (lower = steadier).

@@ -13,6 +13,7 @@ from PIL import Image
 
 from . import api
 from . import bench as benchmod
+from . import video as video_mod
 from .score import input_region
 
 MASK_MODEL = "runware:112@5"  # BiRefNet General
@@ -150,6 +151,71 @@ def mask_from(url, path, model=None):
     return res.get("cost") or 0.0
 
 
+def data_uri(path):
+    """A local picture as a data URI, for tasks on files that were never uploaded (video frames)."""
+    import base64
+    kind = "png" if path.lower().endswith(".png") else "jpeg"
+    return f"data:image/{kind};base64," + base64.b64encode(open(path, "rb").read()).decode()
+
+
+def video_masks(video_path, out_dir, log=None):
+    """Product outlines for a video output: one per sample frame (video.SAMPLES, spread from the first
+    frame to the last), made like the outline of a picture output. The first frame's outline is also
+    stored where the image checks look for it, so outline checks run on a video's first frame.
+    Outlines that are already there are kept. Returns what was spent."""
+    info = video_mod.ensure(video_path, out_dir, log)
+    p = video_mod.paths(out_dir, video_path)
+    todo = [k for k in (smp["k"] for smp in info.get("samples") or []) if not os.path.exists(p["mask"](k))]
+    with ThreadPoolExecutor(max_workers=max(1, len(todo))) as pool:  # a few seconds each: all frames at once
+        cost = sum(pool.map(lambda k: mask_from(data_uri(p["sample"](k)), p["mask"](k)), todo))
+    if os.path.exists(p["mask"](0)) and not os.path.exists(p["first_mask"]):
+        shutil.copyfile(p["mask"](0), p["first_mask"])
+    return cost
+
+
+def video_masks_missing(video_path, out_dir):
+    p = video_mod.paths(out_dir, video_path)
+    return any(not os.path.exists(p["mask"](smp["k"])) for smp in video_mod.ensure(video_path, out_dir).get("samples") or [])
+
+
+def fill_video_masks(out_dir, budget, log=print, per_mask=0.001):
+    """Video outputs that are in the folder without frame outlines (reused from an earlier run, or made
+    before the runner bought them) get them now. The cost is added to the output's `eval_cost`."""
+    rows = read_results(out_dir)
+    def missing(r):
+        try:
+            return video_masks_missing(os.path.join(out_dir, r["file"]), out_dir)
+        except Exception:  # noqa: BLE001  a file that is not a readable clip gets no outlines
+            return False
+    todo = [r for r in rows if r.get("status") == "success" and r.get("file") and video_mod.is_video(r["file"])
+            and os.path.exists(os.path.join(out_dir, r["file"])) and missing(r)]
+    if not todo:
+        return
+    est = len(todo) * video_mod.SAMPLES * per_mask
+    if budget.spent + est > budget.cap + 1e-9:
+        log(f"Frame outlines for {len(todo)} video output(s) not made: about ${est:.3f} would pass the cap.")
+        return
+    log(f"Making frame outlines for {len(todo)} video output(s) already in this folder ...")
+    for r in todo:
+        try:
+            cost = video_masks(os.path.join(out_dir, r["file"]), out_dir)
+            r["eval_cost"] = (r.get("eval_cost") or 0.0) + cost
+            budget.spent += cost
+            r.pop("mask_error", None)
+        except Exception as e:  # noqa: BLE001
+            r["mask_error"] = f"{type(e).__name__}: {e}"
+    with open(os.path.join(out_dir, "results.jsonl"), "w", encoding="utf8") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+
+def spent_on(results):
+    """What a run folder's results cost: generations made here (not the ones copied from another
+    folder) plus everything spent on outlines for them."""
+    return sum((0 if r.get("reused_from") else (r.get("spend", r.get("cost")) or 0)) + (r.get("eval_cost") or 0)
+               for r in results)
+
+
 def history(dirs):
     """Successful results by content key across run folders, with the folder they live in."""
     found = {}
@@ -165,9 +231,11 @@ def reuse(j, src_dir, src, out_dir):
     ext = os.path.splitext(src["file"])[1]
     name = f"{j['input']}__{j['recipe']}__s{j['seed']}{ext}"
     shutil.copyfile(os.path.join(src_dir, src["file"]), os.path.join(out_dir, name))
-    m_src = os.path.join(src_dir, "masks", src["file"].rsplit(".", 1)[0] + "_cut.png")
-    if os.path.exists(m_src):
-        shutil.copyfile(m_src, os.path.join(out_dir, "masks", name.rsplit(".", 1)[0] + "_cut.png"))
+    old, new = src["file"].rsplit(".", 1)[0], name.rsplit(".", 1)[0]
+    for tail in ["_cut.png"] + [f"__f{k}_cut.png" for k in range(video_mod.SAMPLES)]:  # outline(s) of the output
+        m_src = os.path.join(src_dir, "masks", old + tail)
+        if os.path.exists(m_src):
+            shutil.copyfile(m_src, os.path.join(out_dir, "masks", new + tail))
     row = {**src, **{k: j[k] for k in ("input", "recipe", "seed", "model", "fp", "hash")},
            "file": name, "reused_from": os.path.abspath(src_dir), "eval_cost": 0.0}
     return row
@@ -293,11 +361,10 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
             done.add(j["hash"])
             reused += 1
     if reused:
-        log(f"Reused {reused} matching result(s) from earlier runs (same recipe fingerprint, inputs and seed).")
+        log(f"Reused {reused} matching result(s) from earlier runs (same recipe fingerprint, inputs and draw).")
         results = read_results(out_dir)
     todo = [j for j in jobs if j["hash"] not in done]
-    spent = sum((r.get("spend", r.get("cost")) or 0) + (r.get("eval_cost") or 0)
-                for r in results if not r.get("reused_from"))
+    spent = spent_on(results)
     est = estimate(todo, results)
     unknown = [e["recipe"] for e in est if e["est_cost"] is None]
     projected = sum(e["est_cost"] or 0 for e in est)
@@ -314,6 +381,7 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
     journal = Journal(out_dir)
     est_by = {e["hash"]: e["est_cost"] for e in est}
     ids = ("input", "recipe", "seed", "model", "fp", "hash")
+    frame_masks = ((b or {}).get("video") or {}).get("masks", True)
 
     def guarded(fn):
         """The projection above is an estimate; this holds the cap against what tasks really cost."""
@@ -338,6 +406,8 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
                    cost=res.get("cost"), latency_s=res.get("latency_s"), error=res.get("error"))
         if res.get("resumed"):
             row["resumed"] = True
+        if res.get("seed") is not None:
+            row["seed_used"] = res["seed"]  # the seed the model reports for this draw (none was asked for)
         if j["model"] == benchmod.ROUTER and res.get("model"):
             row["picked_model"] = res["model"]  # the response names the model the router chose
         row["task_type"] = j["task"].get("taskType")
@@ -365,15 +435,21 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
                     row["eval_cost"] = mask_from(url, os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
                 except RuntimeError as e:
                     row["mask_error"] = str(e)
+            elif video_mod.is_video(row["file"]) and frame_masks:
+                # the same for a clip: an outline for each sample frame (see video_masks)
+                try:
+                    row["eval_cost"] = video_masks(os.path.join(out_dir, row["file"]), out_dir)
+                except Exception as e:  # noqa: BLE001  a clip that cannot be read or outlined is still a paid output
+                    row["mask_error"] = f"{type(e).__name__}: {e}"
         return row
 
     def report(row):
         append_result(out_dir, row)
         took = "fetched from an earlier run" if row.get("resumed") else f"{row['latency_s']}s"
-        status = (f"${row['cost'] or 0:.4f} · {took}" if row["status"] == "success"
+        status = (f"${row['cost'] or 0:.4f} Â· {took}" if row["status"] == "success"
                   else f"ERROR {row['error']}")
         extra = f" ({'; '.join(row['steps'])})" if row.get("steps") else ""
-        log(f"  {row['input']} · {row['recipe']} · s{row['seed']}: {status}{extra}")
+        log(f"  {row['input']} Â· {row['recipe']} Â· s{row['seed']}: {status}{extra}")
 
     def safe(fn):
         def wrapped(j):
@@ -400,6 +476,8 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for row in pool.map(safe(guarded(lambda j: run_pipeline(j, b, out_dir, bases, lock_path, journal))), piped):
                 report(row)
+    if frame_masks:
+        fill_video_masks(out_dir, budget, log)
     return read_results(out_dir)
 
 

@@ -279,7 +279,7 @@ def section(n_pairs):
     return (
         "<details id='lab-box'><summary>Label the outputs yourself (<span id='lab-count'>optional</span>)</summary>"
         "<p class='ink2'>Mark outputs good or bad, then pick the better of two. Recipe names are hidden here and "
-        "the order is shuffled. Each recipe is shown at its best seed (the one that fails the fewest checks). "
+        "the order is shuffled. Each recipe is shown at its best draw (the one that fails the fewest checks). "
         "Labels are kept in this browser, for this report; export them to share them or to "
         "use them with <span class='mono'>runware-eval calibrate</span>.</p>"
         "<div class='tabs'><button data-tab='label'>1 · Good or bad</button>"

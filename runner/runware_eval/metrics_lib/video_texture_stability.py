@@ -31,4 +31,5 @@ def compute(pair, opt):
     for i, flow in enumerate(flows):
         back = cv2.remap(L[i + 1], xx + flow[..., 0], yy + flow[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         per.append(float(np.abs((back - back.mean()) - (L[i] - L[i].mean())).mean()))
-    return {"value": float(np.mean(per)), "worst_frame": float(np.max(per))}
+    return {"value": float(np.mean(per)), "worst_frame": float(np.max(per)),
+            "series": series(per, video(pair)["analysis_fps"], start=1)}

@@ -22,4 +22,5 @@ def compute(pair, opt):
     if not len(s) or s[0] < 1e-9:
         return {"value": float("nan")}
     tail = s[-max(1, len(s) // 4):]
-    return {"value": float(np.median(tail) / s[0]), "lowest": float(s.min() / s[0])}
+    return {"value": float(np.median(tail) / s[0]), "lowest": float(s.min() / s[0]),
+            "series": series(s / s[0], v["analysis_fps"])}

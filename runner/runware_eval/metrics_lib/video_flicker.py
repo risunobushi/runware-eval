@@ -24,4 +24,5 @@ def compute(pair, opt):
     if len(L) < 3:
         return {"value": float("nan")}
     d2 = np.abs(L[2:] - 2 * L[1:-1] + L[:-2])
-    return {"value": float(d2.mean()), "worst_frame": float(d2.mean(axis=(1, 2)).max())}
+    per = d2.mean(axis=(1, 2))
+    return {"value": float(d2.mean()), "worst_frame": float(per.max()), "series": series(per, v["analysis_fps"], start=1)}

@@ -26,7 +26,9 @@ from PIL import Image
 VIDEO_EXT = (".mp4", ".webm", ".mov", ".m4v")
 ANALYSIS_FPS = 8
 ANALYSIS_SIDE = 384
-ADAPTER = 2  # raise when prepare() changes what it writes, so cached render facts are rebuilt
+SAMPLES = 5        # frames kept at full size, evenly spread from first to last: outlines, product checks, judges
+SAMPLE_SIDE = 1280
+ADAPTER = 3  # raise when prepare() changes what it writes, so cached render facts are rebuilt
 
 
 def is_video(path):
@@ -80,24 +82,62 @@ def frames(path, fps=ANALYSIS_FPS, side=ANALYSIS_SIDE, bars=None):
     return np.stack([_small(_crop(f, bars) if bars and any(bars) else f, side) for _, f in _decode(path, fps)])
 
 
-def prepare(path, first_png, strip_jpg, preview_mp4):
-    """Write the first frame, a first/middle/last strip and a small preview. Returns the clip's facts."""
-    meta, first, mid, last, n, mid_at, small = None, None, None, None, 0, 0, []
+def sample_indices(n, k=SAMPLES):
+    """`k` analysis-frame numbers spread evenly from the first to the last (fewer for a very short clip)."""
+    return sorted({int(round(i * (n - 1) / max(1, k - 1))) for i in range(k)})
+
+
+def paths(out_dir, fname):
+    """Where the adapter keeps what it makes of one video output. Frame masks are bought by the run
+    (run.video_masks), everything else is written by `ensure`."""
+    stem_ = os.path.basename(fname).rsplit(".", 1)[0]
+    r = os.path.join(out_dir, "renders", stem_)
+    return {"first": r + "__first.png", "strip": r + "__frames.jpg", "preview": r + "__preview.mp4",
+            "facts": r + "__video.json", "sample": lambda k: f"{r}__f{k}.jpg",
+            "mask": lambda k: os.path.join(out_dir, "masks", f"{stem_}__f{k}_cut.png"),
+            "first_mask": os.path.join(out_dir, "masks", f"{stem_}_cut.png")}
+
+
+def ensure(path, out_dir, log=None):
+    """The clip's facts, with its first frame, sample frames, strip and preview written once."""
+    import json
+    p = paths(out_dir, path)
+    if os.path.exists(p["facts"]) and os.path.exists(p["first"]):
+        info = json.load(open(p["facts"], encoding="utf8"))
+        if info.get("adapter") == ADAPTER:
+            return info
+    if log:
+        log(f"  reading {os.path.basename(path)}: frames, strip and preview ...")
+    os.makedirs(os.path.join(out_dir, "renders"), exist_ok=True)
+    info = prepare(path, p["first"], p["strip"], p["preview"], p["sample"])
+    json.dump(info, open(p["facts"], "w", encoding="utf8"))
+    return info
+
+
+def prepare(path, first_png, strip_jpg, preview_mp4, sample_jpg=None):
+    """Write the first frame, a first/middle/last strip, the sample frames and a small preview.
+    `sample_jpg(k)` names the file for sample k. Returns the clip's facts."""
+    meta, n, small = None, 0, []
     for meta, f in _decode(path):
         small.append(_small(f, 192))
-        if n == 0:
-            first = f
-            mid_at = int(round((meta.get("duration") or 0) * ANALYSIS_FPS)) // 2
-        if n <= mid_at:
-            mid = f
-        last = f
         n += 1
     if not n:
         raise ValueError(f"No frames could be read from {os.path.basename(path)}")
     bars = find_bars(small)
+    want = sample_indices(n)
+    keep = {}
+    for i, (_, f) in enumerate(_decode(path)):  # second pass: only the frames that are kept at full size
+        if i in want or i == n // 2:
+            keep[i] = f
+    first, mid, last = keep[0], keep[n // 2], keep[n - 1]
     Image.fromarray(_crop(first, bars)).save(first_png)
     strip = np.concatenate([_small(x, 480) for x in (first, mid, last)], axis=1)
     Image.fromarray(strip).save(strip_jpg, quality=85)
+    samples = []
+    for k, i in enumerate(want):
+        if sample_jpg:
+            Image.fromarray(_small(_crop(keep[i], bars), SAMPLE_SIDE)).save(sample_jpg(k), quality=90)
+        samples.append({"k": k, "frame": i, "t": round(i / ANALYSIS_FPS, 3)})
     w, h = meta["size"]
     try:
         frames_native, secs = imageio_ffmpeg.count_frames_and_secs(path)
@@ -109,6 +149,7 @@ def prepare(path, first_png, strip_jpg, preview_mp4):
             "bars_share": round(1 - (cw * ch) / (w * h), 4),
             "width": w, "height": h, "native_fps": float(meta.get("fps") or 0), "duration": float(secs or 0),
             "native_frames": frames_native, "analysis_fps": ANALYSIS_FPS, "analysis_frames": n,
+            "samples": samples if sample_jpg else [],
             "file_mb": os.path.getsize(path) / 1e6, "preview": bool(preview)}
 
 

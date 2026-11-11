@@ -31,4 +31,5 @@ def compute(pair, opt):
         mag = np.hypot(flow[..., 0], flow[..., 1])
         per.append(float(mag[sel].mean() if sel is not None and sel.any() else mag.mean()))
     scale = v["analysis_fps"] / np.hypot(w, h) * 100
-    return {"value": float(np.mean(per) * scale), "peak": float(np.max(per) * scale)}
+    return {"value": float(np.mean(per) * scale), "peak": float(np.max(per) * scale),
+            "series": series(np.array(per) * scale, v["analysis_fps"], start=1)}

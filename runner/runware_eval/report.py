@@ -28,6 +28,85 @@ RAMP = np.array([[0x1f, 0x3a, 0x1b], [0x34, 0x5c, 0x2d], [0x6f, 0xbf, 0x5f], [0x
 JS = """
 const D = JSON.parse(document.getElementById('data').textContent);
 const tip = document.querySelector('.tip');
+let cur = {input: D.inputs[0], recipe: D.order[0]};
+const RW = (() => {
+  const byId = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = v => Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+  // ---- clips: one clock for both players, so two recipes can be watched side by side
+  const va = byId('clip'), vb = byId('clip-b'), seek = byId('clip-seek'), playBtn = byId('clip-play');
+  let other = '', T = 0, playing = true, last = 0;
+  const live = v => v.getAttribute('src') && v.readyState > 0;
+  const span = () => Math.max(live(va) ? va.duration : 0, live(vb) ? vb.duration : 0) || 0;
+  function load(v, src) { if (src) { if (v.getAttribute('src') !== src) v.src = src; } else if (v.getAttribute('src')) { v.pause(); v.removeAttribute('src'); v.load(); } }
+  function place(v, hard) {
+    if (!live(v)) return;
+    const end = v.duration - 0.05;
+    if (T >= end) { if (!v.paused) v.pause(); if (Math.abs(v.currentTime - end) > 0.1) v.currentTime = Math.max(0, end); return; }
+    if (hard || Math.abs(v.currentTime - T) > 0.15) v.currentTime = T;
+    if (playing && v.paused) v.play().catch(() => {}); if (!playing && !v.paused) v.pause();
+  }
+  function tick(now) {
+    requestAnimationFrame(tick);
+    const dt = Math.min(0.1, (now - last) / 1000 || 0); last = now;
+    if (byId('clip-panel').hidden || !span()) return;
+    if (playing) { T += dt; if (T >= span()) { T = 0; place(va, true); place(vb, true); } }
+    place(va); place(vb);
+    if (document.activeElement !== seek) seek.value = Math.round(T / span() * 1000);
+    byId('clip-time').textContent = T.toFixed(1) + ' / ' + span().toFixed(1) + ' s';
+  }
+  seek.addEventListener('input', () => { T = seek.value / 1000 * span(); place(va, true); place(vb, true); });
+  playBtn.addEventListener('click', () => { playing = !playing; playBtn.textContent = playing ? 'Pause' : 'Play'; });
+  byId('clip-b-pick').addEventListener('change', ev => { other = ev.target.value; clips(D.items[cur.input + '|' + cur.recipe]); });
+  requestAnimationFrame(tick);
+  function clips(r) {
+    const panel = byId('clip-panel'), pick = byId('clip-b-pick');
+    panel.hidden = !(r && r.clip);
+    if (panel.hidden) { load(va, ''); load(vb, ''); return; }
+    const others = D.order.filter(id => id !== cur.recipe && (D.items[cur.input + '|' + id] || {}).clip);
+    if (!others.includes(other)) other = '';
+    pick.innerHTML = '<option value="">no other clip</option>' + others.map(id =>
+      `<option value="${esc(id)}"${id === other ? ' selected' : ''}>${esc(id)}</option>`).join('');
+    byId('clip-b-label').hidden = !others.length;
+    const rb = other ? D.items[cur.input + '|' + other] : null;
+    byId('clip-b-box').hidden = !rb;
+    load(va, r.clip); load(vb, rb ? rb.clip : '');
+    byId('clip-a-cap').textContent = cur.recipe; byId('clip-b-cap').textContent = other;
+    T = 0;
+  }
+  // ---- over time: one small chart per measurement that reports a value per frame
+  function chart(lab, lines, meta) {
+    const W = 360, H = 170, ml = 46, mr = 10, mt = 10, mb = 24, xs = [], ys = [];
+    lines.forEach(l => l.s.forEach(p => { xs.push(p[0]); ys.push(p[1]); }));
+    ['min', 'max'].forEach(k => { if (meta[k] != null) ys.push(meta[k]); });
+    const x1 = Math.max(...xs, 0.001), top = Math.max(...ys); let y0 = Math.min(0, ...ys), y1 = top;
+    if (y1 - y0 < 1e-9) y1 = y0 + 1;
+    y1 += (y1 - y0) * 0.08;
+    const sx = v => ml + v / x1 * (W - ml - mr), sy = v => mt + (1 - (v - y0) / (y1 - y0)) * (H - mt - mb);
+    const out = [`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(lab)} over time">`];
+    out.push(`<line x1="${ml}" x2="${W - mr}" y1="${sy(y0)}" y2="${sy(y0)}" class="ax"/>`);
+    out.push(`<text x="${ml - 6}" y="${sy(y0) + 3}" text-anchor="end">${num(y0)}</text><text x="${ml - 6}" y="${sy(top) + 3}" text-anchor="end">${num(top)}</text>`);
+    out.push(`<text x="${ml}" y="${H - 7}">0 s</text><text x="${W - mr}" y="${H - 7}" text-anchor="end">${x1.toFixed(1)} s</text>`);
+    ['min', 'max'].forEach(k => { if (meta[k] != null) out.push(
+      `<line x1="${ml}" x2="${W - mr}" y1="${sy(meta[k])}" y2="${sy(meta[k])}" class="lim"><title>limit: ${k} ${meta[k]}</title></line>`); });
+    lines.sort((a, b) => (a.id === cur.recipe) - (b.id === cur.recipe)).forEach(l => {
+      const c = l.id === cur.recipe ? ' cur' : '';
+      const d = l.s.map((p, i) => (i ? 'L' : 'M') + sx(p[0]).toFixed(1) + ' ' + sy(p[1]).toFixed(1)).join('');
+      out.push(`<g><title>${esc(l.id)}</title><path d="${d}" class="tl${c}"/>` + (l.s.length <= 8 ? l.s.map(p =>
+        `<circle cx="${sx(p[0]).toFixed(1)}" cy="${sy(p[1]).toFixed(1)}" r="${c ? 3 : 2}" class="td${c}"/>`).join('') : '') + '</g>');
+    });
+    return `<figure><figcaption>${esc(lab)}${meta.unit ? ' · ' + esc(meta.unit) : ''}</figcaption>${out.join('')}</svg></figure>`;
+  }
+  function overTime(r) {
+    const labs = Object.keys((r && r.series) || {});
+    byId('time-panel').hidden = !labs.length;
+    if (!labs.length) return;
+    byId('tcharts').innerHTML = labs.map(lab => chart(lab, D.order.map(id => ({id,
+      s: ((D.items[cur.input + '|' + id] || {}).series || {})[lab]})).filter(x => x.s && x.s.length), D.seriesMeta[lab] || {})).join('');
+  }
+  return {clips, overTime};
+})();
+
 document.querySelectorAll('.pt').forEach(g => {
   g.addEventListener('mousemove', ev => { tip.textContent = g.dataset.tip; tip.style.opacity = 1;
     tip.style.left = (ev.clientX + 14) + 'px'; tip.style.top = (ev.clientY + 14) + 'px'; });
@@ -46,20 +125,18 @@ document.querySelectorAll('.ba').forEach(el => {
   el.addEventListener('keydown', ev => { if (ev.key === 'ArrowLeft') setPos(pos - .05); if (ev.key === 'ArrowRight') setPos(pos + .05); });
 });
 const ba = document.querySelector('.ba');
-let cur = {input: D.inputs[0], recipe: D.order[0]};
 function chip(ok){ return ok === null ? '<span class="chip na">n/a</span>' : ok ? '<span class="chip ok">✓ pass</span>' : '<span class="chip bad">✕ fail</span>'; }
 function show(){
   const r = D.items[cur.input + '|' + cur.recipe];
   ba.querySelector('img.before').src = D.originals[cur.input].img;
   const crop = document.getElementById('crop-in'); if (crop) crop.src = D.originals[cur.input].crop || '';
+  RW.clips(r); RW.overTime(r);
   if (!r) { document.getElementById('text-panel').hidden = true; ba.querySelector('.after img').removeAttribute('src'); ba.querySelector('.tag.r').textContent = 'no output';
     document.getElementById('kv').innerHTML = '<dt>No output for this combination.</dt>'; return; }
   ba.querySelector('.after img').src = r.img; ba.querySelector('.tag.r').textContent = cur.recipe;
   document.getElementById('heat').src = r.heat || ''; document.getElementById('heat-panel').hidden = !r.heat;
   const tp = document.getElementById('turn-panel'); tp.hidden = !r.turn; if (r.turn) { document.getElementById('turn').src = r.turn;
     document.getElementById('turn-title').textContent = r.turn_title || 'Views'; }
-  const cp = document.getElementById('clip-panel'), cv = document.getElementById('clip'); cp.hidden = !r.clip;
-  if (r.clip) { if (cv.getAttribute('src') !== r.clip) cv.src = r.clip; } else { cv.pause(); cv.removeAttribute('src'); }
   const xp = document.getElementById('text-panel'), o = D.originals[cur.input]; xp.hidden = r.text == null;
   if (r.text != null) { document.getElementById('text-out').textContent = r.text;
     document.getElementById('text-out-cap').textContent = cur.recipe;
@@ -335,7 +412,7 @@ def router_section(rows, agg, order, recipes, best, sec_head):
         "Model Router",
         "Recipes with <span class='mono'>model: auto</span> let Runware's Model Router choose the model. It chooses "
         "from the request (schemas, prices, your routing settings, benchmark scores) and does not see the output, "
-        "so the same request can get a different model on another call: each seed below is one call. A router "
+        "so the same request can get a different model on another call: each draw below is one call. A router "
         "recipe sends one request, so a model that needs other fields than the ones it sends cannot be chosen, "
         "and whatever the request leaves out (size, seed, model settings) is filled in by the router. The checks "
         "are the same ones every other recipe gets.")]
@@ -464,7 +541,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             p = Pair(b, inputs[s["input"]], f, find_mask(out_dir, s["file"], s["recipe"]))
         strip = [f"auto → {s['picked_model']}" if s.get("picked_model") else recipes.get(s["recipe"], {}).get("model", "")]
         if len({x["seed"] for x in scored}) > 1:
-            strip.append(f"seed {s['seed']}")
+            strip.append(f"draw {s['seed']}")
         if s.get("latency_s") is not None:
             strip.append(f"{s['latency_s']:.1f}s")
         if s.get("cost") is not None:
@@ -480,6 +557,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             it["crop"] = uri(p.rgb_out[box[1]:box[3], box[0]:box[2]], 640, 90)
         if s.get("text") is not None:
             it["text"] = s["text"]
+        over_time = {m["label"]: m["values"]["series"] for m in s["metrics"]
+                     if m["status"] == "ok" and (m.get("values") or {}).get("series")}
+        if over_time:
+            it["series"] = over_time
         if s.get("turntable") and os.path.exists(os.path.join(out_dir, s["turntable"])):
             it["turn"] = uri(Image.open(os.path.join(out_dir, s["turntable"])).convert("RGB"), 1200, 82)
             it["turn_title"] = s.get("turn_title")
@@ -540,7 +621,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     task = b.get("task") or re.split(r"(?<=[.!?])\s+", goal, maxsplit=1)[0]  # `task`, else the goal's first sentence
     judges = data.get("judges") or []
     facts = [("Recipes", len(agg), ""), ("Inputs", len(in_order), ", ".join(in_order)),
-             ("Seeds", ", ".join(map(str, seeds)), ""), ("Outputs", len(scored), ""),
+             ("Draws", len(seeds), "Generations per recipe and input. No seed is sent unless a recipe asks for "
+                                   "one, so each draw is a new generation."), ("Outputs", len(scored), ""),
              ("Generation", f"${measured:.3f}", ""), ("Checks", f"${checks_spend:.3f}", "Spend on judges and paid checks"),
              ("Judges", len(judges) or "off", ", ".join(judges)),
              ("Controls", f"{sum(c['ok'] for c in controls)}/{len(controls)} ok" if controls else "none", "")]
@@ -599,7 +681,12 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     judged = any(str(m.get("id", "")).startswith("vlm_") and m.get("status") == "ok"
                  for it in data.get("scored", []) for m in it.get("metrics", []))
     own_judge = sorted({r["id"] for r in b.get("recipes", []) if isinstance(r, dict) and slug(r.get("model")) in panel}) if judged else []
-    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial or own_judge:
+    same = {}  # draws that came back as the very same file: one result, however many were paid for
+    for s in scored:
+        same.setdefault((s["recipe"], s["input"]), []).append(s.get("sha1"))
+    same_draws = sorted(f"{rid} on {inp} ({len(v)} draws)" for (rid, inp), v in same.items()
+                        if len(v) > 1 and v[0] and len(set(v)) == 1)
+    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial or own_judge or same_draws:
         rows = [note(*split_note(n)) for n in notes.get("findings", [])]
         warns = [note(*split_note(n), warn=True) for n in notes.get("caveats", [])]
         for c in bad_ctl:
@@ -617,6 +704,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             warns.append(note("<strong>Models under test sit on the judge panel</strong>",
                               f"{e(', '.join(own_judge))}: each of them judged its own answers. Name other models "
                               "under <code>judges:</code> in bench.yaml, then score again.", True))
+        if same_draws:
+            warns.append(note("<strong>Draws that are the same output</strong>",
+                              f"{e(', '.join(same_draws))}. Every draw came back as the same file, so they count as "
+                              "one result: the model does not vary for this request, or the recipe fixes a seed.", True))
         if partial:
             warns.append(note("<strong>Fewer outputs than the other recipes</strong>",
                               f"{e(', '.join(partial))}. Their verdicts rest on less evidence.", True))
@@ -671,7 +762,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             + "</tbody></table></div></section>")
 
     # standings: every measurement, with its verdict where a limit is set
-    rule_txt = {"majority": "most seeds", "all": "every seed", "any": "at least one seed"}.get(rule, rule)
+    rule_txt = {"majority": "most draws", "all": "every draw", "any": "at least one draw"}.get(rule, rule)
     groups = []
     for c in cols:
         if not groups or groups[-1][0] != c["dimension"]:
@@ -688,7 +779,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "then by cost. "
                + (f"A check passes when it passes on {rule_txt} of every input (<span class='mono'>passRule: {e(rule)}"
                   "</span>). " if any_checks else "This bench sets no limits, so nothing passes or fails here. ")
-               + "Cells: mean over inputs and seeds; ↑ higher is better, ↓ lower is better; bold = best in the column."
+               + "Cells: mean over inputs and draws; ↑ higher is better, ↓ lower is better; bold = best in the column."
                + (f" Not placed (not measured for every recipe, or no better direction): {e(', '.join(unplaced))}."
                   if unplaced else ""))
                + "<div class='tablewrap'><table><thead><tr><th></th><th></th><th></th><th></th>"
@@ -711,7 +802,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                 ok = [p for by_in in a["by_check"][k].values() for p in by_in]
                 v = a["verdict"][k]
                 cells.append(f"<td><span class='chip {'ok' if v else 'bad'}' title='passed on {sum(ok)} of {len(ok)} "
-                             f"outputs (inputs x seeds)'>{'✓' if v else '✕'} {val}"
+                             f"outputs (inputs x draws)'>{'✓' if v else '✕'} {val}"
                              + (f" <span class='mono'>· {sum(ok)}/{len(ok)}</span>" if len(ok) > 1 else "")
                              + "</span></td>")
             else:
@@ -731,7 +822,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
 
     # comparison viewer
     crop_name = next((o.get("crop_name") for o in originals.values() if o.get("crop_name")), None)
-    out.append("<section id='compare'>" + sec_head("Output vs original", "Shown per recipe: its best seed, the one that fails the fewest checks."
+    out.append("<section id='compare'>" + sec_head("Output vs original", "Shown per recipe: its best draw, the one that fails the fewest checks."
                                                if len(seeds) > 1 else ""))
     if len(in_order) > 1:
         out.append("<div class='picker' role='group' aria-label='Input'>" + "".join(
@@ -760,15 +851,27 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     out.append("<div class='panel wide' id='text-panel' hidden><h3>Text</h3><div id='text-in-box' hidden>"
                "<div class='strip'>input</div><pre class='textout' id='text-in'></pre></div>"
                "<div class='strip' id='text-out-cap'></div><pre class='textout' id='text-out'></pre></div>")
-    out.append("<div class='panel' id='clip-panel' hidden><h3>Clip</h3><video id='clip' controls loop muted "
-               "playsinline style='width:100%;border-radius:var(--r)'></video>"
-               + (f"<p class='muted' style='font-size:12px'>{clips_left_out} more clip(s) are in the run folder "
-                  "(left out to keep this file small).</p>" if clips_left_out else "") + "</div>")
+    out.append("<div class='panel wide' id='clip-panel' hidden><h3>Clip</h3><div class='clipbar'>"
+               "<button id='clip-play' type='button'>Pause</button><input type='range' id='clip-seek' min='0' "
+               "max='1000' value='0' aria-label='Position in the clip'><span id='clip-time'></span>"
+               "<label id='clip-b-label'>beside it: <select id='clip-b-pick'></select></label></div>"
+               "<div class='clips'><figure><video id='clip' muted playsinline preload='auto'></video>"
+               "<figcaption id='clip-a-cap'></figcaption></figure><figure id='clip-b-box' hidden>"
+               "<video id='clip-b' muted playsinline preload='auto'></video><figcaption id='clip-b-cap'>"
+               "</figcaption></figure></div><p class='muted' style='font-size:12px'>Both clips run on one clock, "
+               "by time: a shorter clip holds its last frame until the longer one ends."
+               + (f" {clips_left_out} more clip(s) are in the run folder (left out to keep this file small)."
+                  if clips_left_out else "") + "</p></div>"
+               "<div class='panel wide' id='time-panel' hidden><h3>Over time</h3><p class='muted' "
+               "style='font-size:12px'>Each measurement that has a value per frame, across the clip. Green: the "
+               "recipe shown. Grey: the other recipes (hover a line for its name). Dashed: this brief's limit. "
+               "Lines with dots are read on five frames, the others on every analysis frame.</p>"
+               "<div class='tcharts' id='tcharts'></div></div>")
     out.append("<div class='panel wide' id='turn-panel' hidden><h3 id='turn-title'>Views</h3>"
                "<img id='turn' alt='Views of the output'></div></div></section>")
 
     # gallery
-    out.append("<section>" + sec_head("Outputs", ("Each recipe's best seed (the one that fails the fewest checks): model · seed · speed · cost. "
+    out.append("<section>" + sec_head("Outputs", ("Each recipe's best draw (the one that fails the fewest checks): model · draw · speed · cost. "
                                                if len(seeds) > 1 else "Model · speed · cost. ") + "Click to compare."))
     for k in in_order:
         if len(in_order) > 1:
@@ -803,7 +906,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                 labels.append(m["label"])
     out.append("<section>" + sec_head("All measurements", "The measured values, before any threshold: the same "
                                       "for every user and every re-run of the same outputs.") + "<details><summary>Show table</summary><div class='tablewrap' "
-               "style='margin-top:12px'><table><thead><tr><th>Input</th><th>Recipe</th><th>Seed</th><th>Native</th>"
+               "style='margin-top:12px'><table><thead><tr><th>Input</th><th>Recipe</th><th>Draw</th><th>Native</th>"
                "<th>Cost</th><th title='Seconds from request to result'>Speed</th>" + "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")
     for s in sorted(scored, key=lambda s: (s["input"], order.index(s["recipe"]), s["seed"])):
         byl = {m["label"]: m for m in s["metrics"]}
@@ -818,7 +921,14 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "recipe file and run again. Outputs already measured are reused by fingerprint.</p></div>"
                "<code>runware-eval run bench.yaml</code></section>")
 
+    reg = catalog.load(b)
+    series_meta = {}
+    for spec in (b.get("evaluate") or {}).values():
+        for opt in spec.get("metrics", []):
+            unit = (reg.get(metric_id(opt)) or {}).get("meta", {}).get("unit")
+            series_meta[metric_label(opt)] = {"unit": unit, **{k: opt[k] for k in ("min", "max") if k in opt}}
     payload = {"inputs": in_order, "order": order, "originals": originals, "cal": cal_data, "lab": lab_data, "best": best,
+               "seriesMeta": series_meta,
                "recipes": {r: {"checks": a["checks"], "fails": a["fails"], "cost": a["cost"], "place": a["place"],
                                "model": recipes.get(r, {}).get("model", "")} for r, a in agg.items()},
                "items": {k: {kk: vv for kk, vv in v.items() if kk not in ("thumb", "_rank", "strip")} for k, v in items.items()}}

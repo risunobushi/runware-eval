@@ -4,7 +4,7 @@ Placeholders in recipe params:
   $input                     the input's media URL (for a text input, .txt or .md: its content)
   $input.width / .height     input size, adjusted by the recipe's `size` block
   $input.width_16[_max2048]  legacy form: multiple of 16, optional longest-side cap
-  $seed                      the current seed
+  $seed                      the draw's number, sent as the seed (leave it out for a random seed per draw)
   $prompts.<name>            a prompt from the top-level `prompts` block
   $<name>                    URL of a top-level media entry, e.g. `lighting_ref: {path: ...}`
 """
@@ -20,7 +20,6 @@ import yaml
 from PIL import Image
 
 from . import text as textmod
-from .adapters import DRAW_TYPES
 
 
 def _fix_bool_keys(o):
@@ -179,8 +178,24 @@ def content_key(b, task):
     return hashlib.sha1(json.dumps(swap(task), sort_keys=True).encode()).hexdigest()[:20]
 
 
+def draws(b):
+    """How many times each recipe runs on each input: `draws` in bench.yaml (default 3). The draws are
+    numbered 1..n; the number is the job's `seed` field and the `__s<n>` in file names."""
+    if "seeds" in b:
+        raise ValueError("bench.yaml: `seeds: [...]` is now `draws: <how many>` (e.g. `draws: 3`). No seed is "
+                         "sent unless a recipe asks for one, so every draw is a new generation.")
+    n = b.get("draws", 3)
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        raise ValueError(f"bench.yaml: `draws` must be a whole number of 1 or more, not {n!r}")
+    return list(range(1, n + 1))
+
+
 def jobs(b, round_name, only_inputs=None, only_recipes=None):
-    """One job per (input, recipe, seed). Smoke round: first input (unless chosen), first seed."""
+    """One job per (input, recipe, draw). Smoke round: first input (unless chosen), first draw.
+
+    No seed is sent unless the recipe has `$seed` in its params, so each draw is a new generation on
+    the model's own random seed and gets its own cache key. A recipe that does send `$seed` gets the
+    draw number as its seed: the same pictures on every re-run, at the price of a fixed seed."""
     inputs = [i for i in b["inputs"] if not only_inputs or stem(i["path"]) in only_inputs]
     recipes = [r for r in b["recipes"] if not only_recipes or r["id"] in only_recipes]
     cap = b.get("maxModels")
@@ -188,7 +203,7 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
     if cap and len(models) > cap:
         raise ValueError(f"{len(models)} models selected but maxModels is {cap}: choose which {cap} to test "
                          "(list their recipes under `recipes:` in bench.yaml, or pass --recipes).")
-    seeds = b.get("seeds", [1])
+    seeds = draws(b)
     if round_name == "smoke":
         seeds = seeds[:1]
         if not only_inputs:
@@ -208,12 +223,12 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
                     rt = routing(b, r, ctx)
                     if rt:
                         task["routing"] = rt
-                    # the router may pick a different model on every call: each seed is its own draw,
-                    # never a cache hit on another seed's result
+                    # the router may pick a different model on every call: each draw is its own call,
+                    # never a cache hit on another draw's result
                     base = hashlib.sha1(json.dumps([content_key(b, task), "draw", seed]).encode()).hexdigest()[:20]
-                elif task["taskType"] in DRAW_TYPES and "$seed" not in json.dumps(r.get("params", {})):
-                    # tools and text models mostly take no seed: each seed is then one more call of the
-                    # same request (its own cache key), which shows how much the answer varies
+                elif "$seed" not in json.dumps(r.get("params", {})):
+                    # no seed in the request: every draw is one more call of the same request, with
+                    # its own cache key, so three draws are three generations and never one shown thrice
                     base = hashlib.sha1(json.dumps([base, "draw", seed]).encode()).hexdigest()[:20]
                 pipeline = bool(r.get("then") or r.get("post"))
                 key = base if not pipeline else hashlib.sha1(json.dumps(

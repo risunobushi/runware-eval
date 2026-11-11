@@ -132,6 +132,20 @@ display:grid;cursor:pointer;transition:border-color .15s}
 .gallery .row1{display:flex;justify-content:space-between;gap:6px;align-items:center;font:500 12.5px var(--sans)}
 .gallery .row1 span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gallery .strip{font-size:10.5px}
+.clipbar{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;font:12.5px var(--mono);color:var(--ink2)}
+.clipbar select,.clipbar button{font:12.5px var(--mono);padding:6px 10px;border-radius:var(--r);border:1px solid var(--grid);
+background:var(--card);color:var(--ink);cursor:pointer;max-width:100%}
+.clipbar button{min-width:64px}.clipbar input[type=range]{flex:1 1 200px;min-width:0;accent-color:var(--green)}
+.clips{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,440px));gap:12px;justify-content:center}
+.clips figure{margin:0;display:grid;gap:6px}
+.clips video{width:100%;max-height:72vh;object-fit:contain;border-radius:var(--r);background:var(--deep);display:block}
+.tcharts{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.tcharts figure{margin:0;display:grid;gap:5px}
+.tcharts svg{width:100%;height:auto;background:var(--surface);border:1px solid var(--grid);border-radius:5px;display:block}
+.tcharts .tl{fill:none;stroke:var(--axis);stroke-width:1.2}.tcharts .tl.cur{stroke:var(--green);stroke-width:2}
+.tcharts .td{fill:var(--axis)}.tcharts .td.cur{fill:var(--green)}.tcharts .ax{stroke:var(--axis);stroke-width:1}
+.tcharts .lim{stroke:var(--yellow-mid);stroke-width:1;stroke-dasharray:4 4;opacity:.75}
+.tcharts text{font:10px var(--mono);fill:var(--muted)}.tcharts g:hover .tl{stroke:var(--ink)}
 details{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);padding:13px 16px}
 summary{cursor:pointer;font-weight:600}summary:hover{color:var(--green)}
 .cta{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:center;justify-content:space-between;padding:28px;

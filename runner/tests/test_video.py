@@ -124,7 +124,7 @@ yaml.safe_dump({
             {"id": "video_scene_hold", "max": 0.35}, {"id": "video_frozen_frames", "max": 0.2},
             {"id": "video_texture_stability", "max": 0.6}]},
     },
-    "budget": {"maxSpend": 1}, "seeds": [1],
+    "budget": {"maxSpend": 1}, "draws": 1,
     "recipes": [{"id": n, "model": "test:1@1", "taskType": "videoInference", "params": {}} for n in CLIPS],
 }, open(os.path.join(d, "bench.yaml"), "w"))
 

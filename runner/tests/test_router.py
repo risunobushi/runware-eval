@@ -19,7 +19,7 @@ def make_bench(router):
     inp = {"path": "in/a.jpg", "_url": "http://m/a.jpg", "_size": (1000, 1500)}
     named = [{"id": "one", "model": "x:1@1", "params": {"positivePrompt": "p", "seed": "$seed"}},
              {"id": "two", "model": "y:2@1", "params": {"positivePrompt": "p", "seed": "$seed"}}]
-    return {"_dir": ".", "_url_sha": {"http://m/a.jpg": "abc"}, "inputs": [inp], "seeds": [1, 2, 3],
+    return {"_dir": ".", "_url_sha": {"http://m/a.jpg": "abc"}, "inputs": [inp], "draws": 3,
             "recipes": named + [router]}
 
 
@@ -31,9 +31,9 @@ t = jobs[0]["task"]
 check("the task goes out as model auto with a routing block", t["model"] == "auto" and "routing" in t)
 check("`allowedModels: bench` becomes the bench's other models", t["routing"]["allowedModels"] == ["x:1@1", "y:2@1"])
 check("preferences are passed through", t["routing"]["preferences"] == {"quality": 5})
-check("each seed is its own draw (no seed in the request, three cache keys)",
+check("each draw is its own call (no seed in the request, three cache keys)",
       len({j["hash"] for j in jobs}) == 3 and "seed" not in t)
-check("the same seed keeps its key between runs",
+check("the same draw keeps its key between runs",
       [j["hash"] for j in jobs] == [j["hash"] for j in bench.jobs(b, "full") if j["recipe"] == "router"])
 
 try:

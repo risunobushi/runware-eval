@@ -25,4 +25,5 @@ def compute(pair, opt):
     if opt.get("ignore_lightness"):
         cur[:, 0] = ref[:, 0]
     de = deltaE_ciede2000(ref, cur)
-    return {"value": float(de.max()), "end": float(de[-1]), "at_s": float(de.argmax() / v["analysis_fps"])}
+    return {"value": float(de.max()), "end": float(de[-1]), "at_s": float(de.argmax() / v["analysis_fps"]),
+            "series": series(de, v["analysis_fps"])}

@@ -160,7 +160,7 @@ def run_combined(panel, prepared, opts):
     subject = rest[0] if rest else "image 2"  # what is judged: the output picture, or "the TEXT" for text outputs
     questions, spans, rubric = [], [], None
     for o in opts:
-        qs = o.get("questions") or ([SAME_OBJECT] if o["id"] == "vlm_same_object" else [])
+        qs = o.get("questions") or ([SAME_OBJECT.replace("image 2", subject)] if o["id"] == "vlm_same_object" else [])
         spans.append((len(questions), len(questions) + len(qs)))
         questions += qs
         if o["id"] == "vlm_rubric":
@@ -228,6 +228,21 @@ INTRO_CROP = ("Image 1 is a close-up crop of the original product photo. Image 2
               "AI edit. Judge image 2, comparing with image 1 where a question needs it.")
 
 
+INTRO_VIDEO = ("Image 1 is the original product photo. Images 2, 3 and 4 are the first, middle and last frame of "
+               "a video generated from it, in that order. Judge the video through these frames, comparing with "
+               "image 1 where a question needs it. A question about the video holds only if it holds in every "
+               "frame shown, unless it names one.")
+VIDEO_SUBJECT = "the video (images 2 to 4)"
+
+
+def video_frames(p):
+    """First, middle and last sample frame of a video output, or None (not a video, or no samples kept)."""
+    files = [s["file"] for s in (getattr(p, "video", None) or {}).get("sample_files") or []]
+    if len(files) < 3:
+        return None
+    return [np.asarray(Image.open(f).convert("RGB")) / 255.0 for f in (files[0], files[len(files) // 2], files[-1])]
+
+
 def prepare(p, opt, b=None):
     """Inline images and intro for one vlm_* metric on one input/output pair (a score.Pair).
 
@@ -237,19 +252,22 @@ def prepare(p, opt, b=None):
     region = opt.get("region")
     if getattr(p, "text", None) is not None:
         return prepare_text(p, opt, b)
-    if region:
+    frames = None if region else video_frames(p)
+    if region:  # a region is where it was in the input: for a video that only holds for the first frame
         r = p.region(region)
         images, intro = [data_uri(crop(p.rgb_in, r)), data_uri(crop(p.rgb_out, r))], INTRO_CROP
+    elif frames:
+        images, intro = [data_uri(p.rgb_in)] + [data_uri(f) for f in frames], INTRO_VIDEO
     else:
         images, intro = [data_uri(p.rgb_in), data_uri(p.rgb_out)], INTRO
-    for i, name in enumerate(opt.get("refs") or [], start=3):
+    for i, name in enumerate(opt.get("refs") or [], start=len(images) + 1):
         entry = (b or {}).get(name)
         if not (isinstance(entry, dict) and "path" in entry):
             raise KeyError(f"refs: '{name}' is not a top-level media entry in bench.yaml")
         rgb = np.asarray(Image.open(os.path.join(b["_dir"], entry["path"])).convert("RGB")) / 255.0
         images.append(data_uri(rgb))
         intro += f" Image {i} is the reference '{name.replace('_', ' ')}': use it only where a question mentions it."
-    return images, intro
+    return (images, intro, VIDEO_SUBJECT) if frames else (images, intro)
 
 
 TEXT_LIMIT = 12000  # characters of a text shown to a judge

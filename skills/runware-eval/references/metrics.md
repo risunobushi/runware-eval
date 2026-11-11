@@ -143,8 +143,12 @@ and 3D renders are compared fairly. Tested on the bag: no 3D model reproduced th
 The runner reads every video output with a frame adapter (ffmpeg comes with the runner; nothing to
 install). The **first frame** at full size becomes the output image, so every image check above
 compares it with the input: for image-to-video that answers "did it start from my image?". The
-video checks read the whole clip at 8 frames per second, longest side 384 px. The report embeds a
-small preview of each clip and a first / middle / last frame strip.
+video checks read the whole clip at 8 frames per second, longest side 384 px. **Five sample frames**,
+spread evenly from the first to the last, are kept at full size: the run buys a product outline for
+each (background removal, about 0.0006 USD a frame), the product checks read them, and the judges see
+the first, middle and last one. The report embeds a small preview of each clip and a first / middle /
+last frame strip, plays two recipes' clips side by side on one clock, and draws every measurement that
+has a value per frame over time, one line per recipe.
 
 | id | unit | notes |
 |---|---|---|
@@ -158,10 +162,22 @@ small preview of each clip and a first / middle / last frame strip.
 | `video_letterbox` | share of frame | black bars that stay for the whole clip (fixed-shape models pad other shapes). The runner leaves bars out before every other check; gate with `max: 0` if the clip must have none |
 | `video_duration` | s | also reports frame rate and size; gate it when a model has fixed duration steps |
 
-Limits to say out loud: outline checks (`mask_iou`, `phase_correlation`, `bbox_aspect`) are not run
-on video, because the output has no product mask of its own. Identity in later frames (is it still
-the same product after it turned?) has no pixel check yet: use the frame strip and the labeling
-page. Thresholds for the video checks come from synthetic clips; calibrate them on a labeled run.
+Product checks, on the five sample frames and their outlines:
+
+| id | unit | notes |
+|---|---|---|
+| `video_outline_hold` | IoU, higher | lowest overlap between the product's outline in a sample frame and in the input. As it is, for clips where the product should stay put (a relight, a locked-off shot). `align: true` first moves and scales each outline onto the input's bounding box, so only the shape counts: a push-in passes, a product that changes shape does not. A turning product changes shape honestly: do not limit it on an orbit |
+| `video_product_area` | × input area | smallest area of the product over the clip relative to the input (`largest` and `pieces` too). Near 0: it left the frame or dissolved. No better direction: gate both sides (`min: 0.5, max: 2`) with what the brief allows |
+| `video_product_drift` | histogram distance, lower | is it still the same product later on? The product's colour make-up inside its own outline, each sample frame against the input (0 = same, 1 = nothing in common); `first` is the floor a plain re-encode scores. It follows the product wherever it moves. `ignore_lightness: true` for briefs that change the light. It does not see shape or lettering |
+| `mask_iou`, `phase_correlation`, `bbox_aspect` | | the image outline checks now run on a video's first frame, with that frame's outline |
+| `vlm_same_object`, `vlm_checklist`, `vlm_rubric` | | on a video the judges get the input and the first, middle and last frame, and are asked about "the video": a question holds only if it holds in every frame shown. A check with a `region` still compares that region of the first frame only (a region is where it was in the input) |
+
+Limits to say out loud: the product checks read five frames, not every frame, so a fault that comes
+and goes between them is only caught by the frame-wide checks. A product that turns shows other
+sides: its outline, area and colours change honestly, so limits for an orbit must be loose and the
+judges carry "is it the same product". Lettering in later frames has no pixel check (the logo moves):
+ask the judges. Thresholds for the video checks come from synthetic clips; calibrate them on a labeled
+run. `video: { masks: false }` in bench.yaml skips the outlines; the product checks then show as not run.
 
 ## Upscaled pictures (`upscale`)
 
@@ -273,11 +289,11 @@ the INPUT?"). Set `judgeWhen: { maxFailedChecks: 99 }` when the text checks are 
 is judged. Tested on a product photo: two captioners both called a nylon bag "leather"; no word check
 caught it, the checklist did (and the three judges disagreed on it: read `agreement`).
 
-What a full run showed about captions (four captioners, four photos, three seeds): none passed a
+What a full run showed about captions (four captioners, four photos, three draws): none passed a
 two-question checklist on any photo; all three language models called a nylon bag leather; the CLIP
 interrogator returns a list of tags, with invented artist and person names, not a sentence. Answers were
-the same on every seed for 11 of 16 model and photo pairs, and each call was billed: use `seeds: [1]`
-for captioners. Nothing here measures whether seeds differ; read the outputs.
+the same on every draw for 11 of 16 model and photo pairs, and each call was billed: use `draws: 1`
+for captioners. The report now says when every draw of a recipe came back as the very same file.
 
 Limits to say out loud: picture checks do not run on text, and text checks do not run on pictures
 (both show as *not run*). There are no controls for a text input. The judges are text models

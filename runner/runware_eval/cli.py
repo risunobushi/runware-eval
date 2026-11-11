@@ -11,7 +11,7 @@ def common(ap):
     ap.add_argument("bench", help="path to bench.yaml")
     ap.add_argument("--out", help="output folder (default: <bench dir>/runs/<round>)")
     ap.add_argument("--round", choices=["smoke", "full"], default="smoke",
-                    help="smoke: first input, first seed. full: everything (default: smoke)")
+                    help="smoke: first input, first draw. full: everything (default: smoke)")
     ap.add_argument("--inputs", nargs="*", help="only these inputs (file stems)")
     ap.add_argument("--recipes", nargs="*", help="only these recipe ids")
 

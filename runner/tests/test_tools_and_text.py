@@ -100,7 +100,7 @@ def go(name, task_type, params, evaluate, ids, inputs=None, seeds=(1,), extra=No
     yaml.safe_dump({
         "title": f"{name} test", "goal": f"Compare {task_type} models.", "task": f"{task_type} on the item",
         "inputs": inputs or [{"path": "item.png", "regions": {"product": "item_product.png"}, **(extra or {})}],
-        "evaluate": evaluate, "budget": {"maxSpend": 5}, "seeds": list(seeds),
+        "evaluate": evaluate, "budget": {"maxSpend": 5}, "draws": len(seeds),
         "recipes": [{"id": i, "model": "test:1@1", "taskType": task_type, "params": {**params, "_recipe": i},
                      "price": 0.01} for i in ids],
     }, open(path, "w"))
@@ -127,7 +127,7 @@ b, out, jobs, rows, data, got, html = go(
     ["up-sharp", "up-soft", "up-not"], seeds=(1, 2))
 check("upscale: the request carries the task type and the input", sent[0]["taskType"] == "upscale"
       and sent[0]["inputs"] == {"image": "http://m/item.png"} and sent[0]["upscaleFactor"] == 2)
-check("no seed in the request: each seed is its own call, with its own cache key",
+check("no seed in the request: each draw is its own call, with its own cache key",
       len(jobs) == 6 and len({j["hash"] for j in jobs}) == 6 and len(rows) == 6)
 check("the same job keeps its key between runs", [j["hash"] for j in jobs] == [j["hash"] for j in bench.jobs(b, "full")])
 check("upscale: factor read from the delivered size", abs(val(got, "up-sharp", "Upscale factor") - 2) < 1e-6

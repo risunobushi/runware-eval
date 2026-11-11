@@ -48,7 +48,7 @@ rights are needed. Needs the Runware CLI signed in (`runware auth login`).
 
 ```
 uv run --project runner runware-eval estimate bench.yaml --round smoke
-uv run --project runner runware-eval run      bench.yaml --round smoke   # first input, first seed
+uv run --project runner runware-eval run      bench.yaml --round smoke   # first input, first draw
 uv run --project runner runware-eval run      bench.yaml --round full    # stops before passing the budget
 uv run --project runner runware-eval report   bench.yaml --round full --notes notes.json
 uv run --project runner runware-eval calibrate bench.yaml --round full --labels labels.json   # labels exported from the report
@@ -57,10 +57,11 @@ uv run --project runner runware-eval calibrate bench.yaml --round full --labels 
 **Outputs.** Images are scored directly. Upscaled pictures are also read at their own size; a
 background removal or a mask is compared with a reference outline; an SVG is rendered and its file read
 (shapes, nodes, embedded bitmaps); captions and text answers are checked as text and by the judge panel. 3D models (GLB) are rendered to the view that matches the
-input photo; videos (MP4) are read into frames: the first frame is compared with the input, and
+input photo; videos (MP4) are read into frames: the first frame is compared with the input,
 video checks (motion, frozen frames, scene changes, flicker, colour drift, texture stability, sharpness
-over time, black bars) read the whole clip. The report
-embeds a small preview of each clip. Metrics are one file each: a library ships with the runner
+over time, black bars) read the whole clip, and product checks (outline, size, colour make-up) and the
+judges read five frames spread over it, each with its own product outline. The report
+plays two clips side by side on one clock and draws each per-frame measurement over time. Metrics are one file each: a library ships with the runner
 (`runner/runware_eval/metrics_lib/`), a bench adds its own in `metrics/`, and `examples/metrics/` has
 four written for one bench.
 
@@ -81,6 +82,11 @@ random pairs, with recipe names hidden. Labels stay in your browser; agreement w
 threshold that would agree best and your own ranking are computed in the page as you click. "Export
 labels.json" hands them to `runware-eval calibrate` or to a colleague, who can import them.
 
+**Draws.** Each recipe runs `draws` times on each input (3 by default, 1 in the smoke round). No seed
+is sent unless a recipe asks for one, so every draw is a new generation on the model's own random seed,
+whether or not the model has a seed field. A check passes when it passes on most draws. Draws that come
+back as the very same file are called out in the report.
+
 **Spend.** `budget.maxSpend` (USD for one full run) is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its
 own estimate still fit, and a recipe that costs more than estimated is reserved at its real cost from
@@ -99,7 +105,7 @@ your checks, and how the same model did when called by name: use `auto` where it
 model by name where it does not.
 
 Recipes are one file each in `recipes/`, fingerprinted. Copy a file into another bench to share it;
-matching past results (same fingerprint, same images, same seed) are reused instead of paid for:
+matching past results (same fingerprint, same images, same draw) are reused instead of paid for:
 
 ```
 uv run --project runner runware-eval recipes list    bench.yaml   # id, fingerprint, past runs

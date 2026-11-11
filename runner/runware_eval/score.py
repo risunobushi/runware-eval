@@ -5,6 +5,7 @@ metric in bench.yaml (min, max, mean_max, p95_max, max_px, aspect_tolerance, abs
 legacy `rule: "... >= 3"`). Metrics not implemented yet are reported as `not_run`, never as passes.
 """
 import glob
+import hashlib
 import json
 import os
 import re
@@ -421,20 +422,15 @@ def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
             p = Pair(b, inputs[inp], vpng, vmask)
             p.mesh = view["mesh"]
         elif video_mod.is_video(f):
-            # frame adapter: the first frame is the output image; video checks read the frame sequence
-            os.makedirs(os.path.join(out_dir, "renders"), exist_ok=True)
-            stem_ = fname.rsplit(".", 1)[0]
-            first = os.path.join(out_dir, "renders", stem_ + "__first.png")
-            vjson = os.path.join(out_dir, "renders", stem_ + "__video.json")
-            if not (os.path.exists(vjson) and os.path.exists(first)
-                    and json.load(open(vjson)).get("adapter") == video_mod.ADAPTER):
-                log(f"  reading {fname}: frames, strip and preview ...")
-                info = video_mod.prepare(f, first, os.path.join(out_dir, "renders", stem_ + "__frames.jpg"),
-                                         os.path.join(out_dir, "renders", stem_ + "__preview.mp4"))
-                json.dump(info, open(vjson, "w"))
-            clip = json.load(open(vjson))
-            p = Pair(b, inputs[inp], first, find_mask(out_dir, fname, recipe))
-            p.video = {**clip, "frames": video_mod.frames(f, bars=clip["bars"])}
+            # frame adapter: the first frame is the output image; video checks read the frame sequence,
+            # and the sample frames (with the outlines the run bought for them) carry the product checks
+            clip = video_mod.ensure(f, out_dir, log)
+            vp = video_mod.paths(out_dir, f)
+            p = Pair(b, inputs[inp], vp["first"], find_mask(out_dir, fname, recipe))
+            p.video = {**clip, "frames": video_mod.frames(f, bars=clip["bars"]),
+                       "sample_files": [{**smp, "file": vp["sample"](smp["k"]),
+                                         "mask": vp["mask"](smp["k"]) if os.path.exists(vp["mask"](smp["k"])) else None}
+                                        for smp in clip.get("samples") or []]}
         else:
             op = ops.get(fname, {})
             what = adapters.kind(f, op.get("task_type") or recipes_by_id.get(recipe, {}).get("taskType"))
@@ -457,6 +453,7 @@ def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
             pending.append((g["items"], prepared))
         r = ops.get(fname, {})
         entry = {"input": inp, "recipe": recipe, "seed": int(seed), "file": fname,
+                 "sha1": hashlib.sha1(open(f, "rb").read()).hexdigest(),  # two draws with the same file are one draw
                  "native": f"{p.native[0]}x{p.native[1]}", "cost": r.get("cost"),
                  "latency_s": r.get("latency_s"), "metrics": metrics}
         if r.get("picked_model"):
@@ -485,8 +482,8 @@ def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
         # budget check after the pixel funnel: only outputs that will actually be judged count
         calls = len(pending) * len(panel.judges)
         projected = calls * judge_mod.EST_COST_PER_CALL
-        spent = sum((r.get("spend", r.get("cost")) or 0) + (r.get("eval_cost") or 0)
-                    for r in (results or []) if not r.get("reused_from"))
+        spent = sum((0 if r.get("reused_from") else (r.get("spend", r.get("cost")) or 0)) + (r.get("eval_cost") or 0)
+                    for r in (results or []))
         log(f"Vision judges: {len(pending)} output(s) passed the pixel funnel (at most {max_failed} failed "
             f"check(s)); up to {calls} calls, about ${projected:.2f} (cached answers are free).")
         if maxSpend is not None and spent + projected > maxSpend:

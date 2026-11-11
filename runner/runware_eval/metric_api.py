@@ -46,6 +46,12 @@ A metric file is a small Python module with:
                                 frames per second, longest side 384 px) and the clip's facts (duration,
                                 native_fps, width, height). Raises KeyError for other outputs ('not run').
                                 For a video, pair.rgb_out / lab_out are its first frame.
+    video_samples(pair)         for video outputs: five frames spread from the first to the last, each a dict
+                                with `t` (seconds), `rgb` (float, at the input's size) and `mask` (the product's
+                                outline in that frame, bool, or None when the run bought none)
+    video_outlines(pair)        the same, but raises KeyError ('not run') unless every sample has its outline
+    series(values, fps)         per-frame values as [[seconds, value], ...]: return it as `series` and the
+                                report draws the measurement over time
 `opt` is the metric's entry in bench.yaml (region, thresholds and any options it defines).
 
 Metrics run locally and must not use the network.
@@ -59,7 +65,8 @@ from .text import answer, reasoning, unfence, words
 
 __all__ = ["np", "cv2", "rgb2lab", "deltaE_ciede2000", "structural_similarity", "erode", "mesh_value", "video",
            "out_mask", "video_flow", "media", "text", "text_meta", "words", "alpha", "native_out", "svg_value",
-           "outline", "own_outline", "original", "plain_resize", "text_part", "answer", "reasoning", "unfence"]
+           "outline", "own_outline", "original", "plain_resize", "text_part", "answer", "reasoning", "unfence",
+           "video_samples", "video_outlines", "series"]
 
 
 def text(pair):
@@ -171,6 +178,49 @@ def video_flow(pair):
         g = [cv2.cvtColor(f, cv2.COLOR_RGB2GRAY) for f in v["frames"]]
         v["_flow"] = ([cv2.calcOpticalFlowFarneback(a, b, None, 0.5, 3, 21, 3, 5, 1.1, 0) for a, b in zip(g, g[1:])], g)
     return v["_flow"]
+
+
+def video_samples(pair):
+    """The sample frames of a video output (video.SAMPLES of them, spread evenly from the first frame to
+    the last, black bars left out), resized to the input's size like the first frame is. Each is a dict:
+    `t` seconds into the clip, `rgb` float (H, W, 3) in 0..1, `mask` the product's outline in that frame
+    (bool) or None. Loaded once per output."""
+    v = video(pair)
+    if "_samples" not in v:
+        from PIL import Image
+        out = []
+        for smp in v.get("sample_files") or []:
+            im = Image.open(smp["file"]).convert("RGB")
+            if im.size != (pair.W, pair.H):
+                im = im.resize((pair.W, pair.H), Image.BICUBIC)
+            mask = None
+            if smp.get("mask"):
+                m = Image.open(smp["mask"]).convert("L")
+                if m.size != (pair.W, pair.H):
+                    m = m.resize((pair.W, pair.H), Image.BILINEAR)
+                mask = np.asarray(m) > 127
+            out.append({"t": smp["t"], "rgb": np.asarray(im).astype(np.float64) / 255.0, "mask": mask})
+        v["_samples"] = out
+    if not v["_samples"]:
+        raise KeyError("no sample frames for this clip (scored by an older runner: score it again)")
+    return v["_samples"]
+
+
+def video_outlines(pair):
+    """The sample frames, each with the product's outline. Raises KeyError when the run bought no frame
+    outlines (`video: { masks: false }`, or a run folder from before they existed: run it again)."""
+    smp = video_samples(pair)
+    if any(x["mask"] is None for x in smp):
+        raise KeyError("no product outline for the frames of this clip")
+    return smp
+
+
+def series(values, fps=None, times=None, start=0):
+    """Per-frame values as [[seconds, value], ...] for the report's over-time charts. `fps` and `start`
+    (the frame number of the first value) give the times, or pass `times` in seconds."""
+    vals = [float(x) for x in values]
+    ts = list(times) if times is not None else [(start + i) / float(fps) for i in range(len(vals))]
+    return [[round(float(t), 3), round(v, 4)] for t, v in zip(ts, vals)]
 
 
 def out_mask(pair, spec="product"):

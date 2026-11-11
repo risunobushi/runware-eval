@@ -2,7 +2,7 @@
 
 One file describes a bench completely. The runner reads it; an agent writes it. Adding a model
 later means adding one recipe and re-running. Results are cached by a hash of
-(input, recipe, seed), so a re-run only pays for new combinations.
+(input, recipe, draw), so a re-run only pays for new combinations.
 
 ## Fields
 
@@ -16,8 +16,9 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `estimate` and `run` warn about a requirement nothing measures or that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
 | `calibration` | For judge or aesthetic metrics: how many outputs the user labels. |
 | `budget` | `maxSpend`: the most one full run may spend, in USD. The runner refuses to start above it. Not the Model Router's `maxPrice`, which is a ceiling for one request. |
-| `seeds` | Seeds per recipe in the full run (default `[1, 2, 3]`); the smoke round uses the first. |
-| `passRule` | How seeds decide a check, per input: `majority` (default), `all`, `any`. A recipe must pass on every input. |
+| `draws` | How many times each recipe runs on each input in the full run (default 3); the smoke round runs one. No seed is sent unless a recipe has `seed: $seed`, so every draw is a new generation: see "Draws and seeds". |
+| `passRule` | How draws decide a check, per input: `majority` (default), `all`, `any`. A recipe must pass on every input. |
+| `video` | Optional. `video: { masks: false }` stops the run from buying a product outline for five frames of every video output (about 0.003 USD per clip); the product checks on video then show as not run. |
 | `maxModels` | Most distinct models the bench may run (e.g. 3 or 5). The runner refuses more. |
 | `recipes` | Ids of recipe files to run (or `all`). Each file: `id`, `model` (AIR), `params` (exact schema field names), optional `size` and `mask`, `notes` (every convention translated). |
 
@@ -48,7 +49,6 @@ params:
   positivePrompt: >-
     Relight this product photo using the lighting of the reference image ...
   settings: { quality: low }
-  seed: $seed
 price: 0.03   # USD per output; the estimate and the budget cap use it until a real cost is measured
 notes: >-
   Every convention translated for this model.
@@ -60,7 +60,7 @@ fingerprint: 8a2fdbe2577bf114   # written by runware-eval; changes when the requ
   are missing.
 - **Fingerprint:** a hash of `taskType`, `model`, `params`, `size` and `mask`. Renaming a recipe or
   editing its notes keeps it; changing the request changes it, and the runner rewrites the line.
-- **History:** every result is keyed by fingerprint + content hash of each image sent + seed. A
+- **History:** every result is keyed by fingerprint + content hash of each image sent + draw number. A
   match in any folder under `runs/` (or `--history <folder>`) is copied in instead of paid for again.
 - **Sharing:** copy a recipe file into another bench's `recipes/` folder, or point `recipeDirs` at
   a team folder in git.
@@ -71,11 +71,24 @@ fingerprint: 8a2fdbe2577bf114   # written by runware-eval; changes when the requ
 |---|---|
 | `$input` | the input's media URL (uploaded once by the runner, recorded in `media.lock.json`). For a text input (`.txt`, `.md`): its content |
 | `$input.width`, `$input.height` | input size, adjusted by the recipe's `size` block |
-| `$seed` | the current seed |
+| `$seed` | the draw's number (1, 2, 3 ...), sent as the seed. Leave it out unless runs must reproduce the same pictures |
 | `$prompts.<name>` | a prompt from the top-level `prompts` block |
 | `$<name>` | URL of a top-level media entry, e.g. `lighting_ref: { path: refs/light.png }` (a text file: its content, e.g. `style_guide: { path: refs/tone.md }`) |
 
 URLs are sent, not media UUIDs: some provider-backed models fail to fetch a UUID.
+
+## Draws and seeds
+
+A bench runs every recipe `draws` times on every input, so one lucky or unlucky generation does not
+decide. **No seed is sent by default.** Without one, every model generates on a random seed, so three
+draws are three different outputs, whether or not the model has a seed field; the runner gives each
+draw its own cache key, and keeps the seed the model reports in `results.jsonl` (`seed_used`).
+
+A recipe may still pin seeds with `seed: $seed` in its `params` (the draws then use seeds 1, 2, 3): a
+later run of the same recipe reproduces the same pictures on models that honour seeds. Use it only when
+that is wanted, and only for models whose schema has a seed field. A literal seed (`seed: 42`) makes
+every draw the same picture, paid for each time: the report calls out draws that came back as the very
+same file.
 
 A recipe's `size` block fits the input to a model's limits: `size: { multiple: 16, maxSide: 2048,
 maxMp: 4.19 }`. Check each schema for its own limits and write them here.
@@ -122,8 +135,8 @@ price: 0.08                   # needed when there is no maxPrice: the dearest mo
   a square output from a portrait input, and two resolutions for the same request).
 - **One request shape.** A model that wants the product in another field (`seedImage` instead of
   `referenceImages`) cannot be chosen by this recipe. Say so in `notes`.
-- **Each seed is one call**, and the router may pick a different model each time. Leave `$seed` out
-  unless every candidate has a seed field. Results are cached per seed like any other recipe.
+- **Each draw is one call**, and the router may pick a different model each time. Leave `$seed` out:
+  a seed rules out every candidate without a seed field. Results are cached per draw like any other recipe.
 - **No `then` or `post` steps** on a router recipe yet.
 - `excludedModels` (a list) is the opposite of `allowedModels`; the two cannot be combined.
 
@@ -160,9 +173,9 @@ price: 0.018
 - **Per-input facts for text checks**, next to `path`: `reference:` (a text the answer should be close
   to), `terms:` (words that must appear), `banned:` (words that must not). The same keys on a check
   apply to every input.
-- **Seeds.** Most of these tasks take no seed. Each seed is then one more call of the same request,
-  cached on its own, which shows how much the answer varies: useful for text, wasteful for a tool that
-  always answers the same. Use `seeds: [1]` unless the variation is what you want to see.
+- **Draws.** Each draw is one more call of the same request, cached on its own, which shows how much
+  the answer varies: useful for text, wasteful for a tool that always answers the same (the report says
+  when every draw came back identical). Use `draws: 1` unless the variation is what you want to see.
 - **Prices.** Text models are priced per token, so the listed price says little about one answer: give
   `price` (USD per output) from a smoke round. Add `includeUsage: true` to a `textInference` recipe to
   get token counts (`text_output_tokens`).
@@ -245,7 +258,7 @@ evaluate:
 
 calibration: { labelCount: 8 }
 budget: { maxSpend: 5.00 }
-seeds: [1, 2]
+draws: 2
 
 recipes:
   - id: precise-edit-high
