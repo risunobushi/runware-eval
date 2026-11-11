@@ -51,7 +51,7 @@ tell from a read-only check.
 > | `score`, `report` | re-score or rebuild the report from saved results; no login needed |
 > | `calibrate --labels <file>` | take labels exported from the report: agreement and suggested thresholds |
 > | `label` | a separate blind labeling page covering every draw |
-> | `metrics list` or `metrics control` | the checks this bench can use; test them on unchanged inputs |
+> | `metrics list`, `metrics plan` or `metrics control` | the metrics this bench can use; the table of this bench's checks for the user to choose from; test them on unchanged inputs |
 > | `recipes list` or `recipes extract` | recipe files and their past runs |
 >
 > Spend is capped by `budget.maxSpend` in `bench.yaml`, and an interrupted run can be run again
@@ -199,20 +199,28 @@ recipe can fail it completely and still come first. So, before choosing any metr
    the ones the inputs imply: every file the user supplied is there for a reason (a reference
    background means "the scene is this background"; a style reference means "the output has this
    style"). Add "the task was done at all" for every change the brief asks for.
-2. **Give each requirement a measurement of that requirement**, not of something near it. Use a
-   library metric when one measures it; otherwise write a metric for it (below). Do not leave a
-   requirement to the vision judges alone when pixels can answer it; use the judges for what only an
-   eye can answer, and as the cross-check from a different family.
+2. **Give each requirement a measurement of that requirement**, not of something near it. This is
+   your job, not the user's: you find the requirements in the brief and the inputs, and every one of
+   them gets a check. Use a library metric when one measures it; otherwise write a metric for it
+   (below). The library cannot cover every requirement a brief can have, by design: writing the
+   missing metric is the normal path. A requirement with no check is a mistake in the bench, and
+   `run` refuses to start with one. Do not leave a requirement to the vision judges alone when pixels
+   can answer it; use the judges for what only an eye can answer, and as the cross-check from a
+   different family.
+   **A requirement an output either meets or does not is a yes/no check.** "Reads as one real
+   photograph", "nothing was added", "the logo is readable": ask the judges a yes/no question
+   (`vlm_checklist`, `vlm_same_object`). These pass or fail by themselves, with no number to set: the
+   check passes when, on every question, more judges say yes than no. Write each question so it asks
+   one thing the judges can see. Two things in one question ("a real photo, with light and shadow
+   agreeing") fail together, and a question the judges cannot answer reliably (left versus right, in
+   testing) fails good outputs: leave that to a pixel metric and do not ask it.
 3. **Try lazy outputs in your head.** For each of these, name the check that fails it: the input
    returned unchanged; the subject pasted on top with nothing else done; the right subject in the
    wrong scene or style; a beautiful image that ignores the brief. If one of them fails nothing, a
    requirement is missing or has no limit.
 4. **Write it down** as `requirements:` in `bench.yaml`: each need in the user's words, with the
    labels of the checks that answer it. `estimate` and `run` print what is uncovered before anything
-   is paid, and the report shows the list, so a hole is visible to the reader instead of hidden. If
-   a requirement cannot be measured yet, keep it in the list with no checks and tell the user.
-
-Show the user this list as a table (requirement, measured by, limit) when asking for sign-off.
+   is paid, and the report shows the list, so a hole is visible to the reader instead of hidden.
 
 Writing a metric is normal work here, not a last resort. Think in what can be computed from the
 input, the output, their masks and any reference image (`media(pair, "<name>")` reads one): colour
@@ -241,16 +249,28 @@ Then load `references/metrics.md` for how to choose among existing metrics, and 
      or what the brief implies ("the logo must stay readable"). Aim for at least one limit per chosen
      dimension, and one on the metric that says whether the task was done at all (e.g. the camera did
      orbit): without it, a recipe that does nothing can place well on every "nothing changed" metric.
-   - Leave a metric without a limit only when no honest limit exists yet (judges and aesthetics before
-     calibration, a new bench-specific metric before the smoke round). After the smoke round, propose
-     limits from what was measured.
+   - Leave a metric without a limit only when no honest limit exists yet (a judge rubric or aesthetics
+     score before calibration, a new bench-specific metric before the smoke round). After the smoke
+     round, propose limits from what was measured. Yes/no judge checks are never in this group: they
+     pass or fail from the first run.
    - Say it to the user in plain words: "these are the limits an output must meet; everything else is
      measured and used to place the recipes". A failed check counts against a recipe in the report; it
      does not remove the recipe from the run or from a later step.
    - A metric only places recipes when its `META` has a `direction` (`lower`, `higher` or
      `closer_to_zero`). Set it in every metric you write.
 
-Show the chosen metrics, with one line on why each, and get a yes before continuing.
+**The user chooses the checks.** When the checks are written into `bench.yaml`, run
+`runware-eval metrics plan bench.yaml` and show its table to the user as it is: every check you came
+up with, the requirement it answers, whether its metric comes from the library or was written for
+this bench, how far it can be trusted, and what makes it fail, followed by one line per check on
+what it measures (and the judges' questions, word for word). Ask which ones to apply; they can keep
+all, drop some, or ask for others. Then:
+
+- Remove the checks they dropped from `evaluate` and from `requirements`.
+- If that leaves a requirement with no check, keep the requirement and write the choice down:
+  `- { need: "...", checks: [], notMeasured: "dropped by the user: judged by eye" }`. The report lists
+  it as left out by choice. Never use `notMeasured` for a requirement you did not manage to measure.
+- Show the table again after any change, and get a yes before continuing.
 
 **To write a metric**: a file in the bench's `metrics/` folder with a `META` dict and a
 `compute(pair, opt)` function, following the contract in the runner's `metric_api.py`. Set `kind`

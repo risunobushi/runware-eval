@@ -23,14 +23,20 @@ def setup(a):
     return b, out
 
 
-def brief_coverage(b):
-    """Say, before anything is paid, which parts of the brief no check covers."""
+def brief_coverage(b, paying=False):
+    """Say, before anything is paid, which parts of the brief no check covers. A requirement with no
+    check at all stops a paid run: every requirement gets a metric, or is left out by the user's choice."""
     _, warn = score.coverage(b)
+    errors = score.coverage_errors(b)
     if warn:
         print("Brief coverage:")
         for w in warn:
-            print("  ! " + w)
+            print(("  x " if w in errors else "  ! ") + w)
         print()
+    if errors and paying:
+        sys.exit("Stopped before spending: a requirement of the brief has no check. Give it a metric (write one in "
+                 "metrics/ if the library has none, or a yes/no question for the judges), or, if the user chose not "
+                 "to measure it, say so in bench.yaml: `notMeasured: <why>` on that requirement.")
 
 
 def run_dirs(b):
@@ -114,7 +120,7 @@ def cmd_run(a):
     cap = bench.maxSpend(b)
     if cap is None:
         sys.exit("bench.yaml has no budget.maxSpend: set a cap before running.")
-    brief_coverage(b)
+    brief_coverage(b, paying=True)
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
     run.ensure_input_masks(b, out)
     run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
@@ -171,6 +177,19 @@ def cmd_metrics(a):
     reg = catalog.load(b)
     if a.action == "markdown":
         print(catalog.markdown(reg))
+        return
+    if a.action == "plan":
+        rows = score.plan(b, reg)
+        print("| # | Check | Answers | Metric | Origin | Trust | Fails when |\n|---|---|---|---|---|---|---|")
+        for i, r in enumerate(rows, 1):
+            limit = "never: " + r["limit"] if r["limit"].startswith("none") else "outside " + r["limit"] if r["limit"][0] != "y" else "not " + r["limit"]
+            print(f"| {i} | {r['label']} | {'; '.join(r['needs']) or 'no requirement'} | `{r['id']}` | {r['origin']} | {r['trust']} | {limit} |")
+        print()
+        for i, r in enumerate(rows, 1):
+            qs = "".join(f"\n     - {q}" for q in r["questions"])
+            print(f"{i}. **{r['label']}**: {r['what']}{qs}")
+        for w in score.coverage_errors(b):
+            print(f"\nx {w}")
         return
     if a.action == "list":
         print(f"{'id':22} {'kind':9} {'family':13} {'source':10} fingerprint")
@@ -243,8 +262,8 @@ def main():
     cp.add_argument("--labels", required=True, help="the labels.json downloaded from the labeling page")
     cp.add_argument("--notes")
     cp.set_defaults(fn=cmd_calibrate)
-    mp = sub.add_parser("metrics", help="list metrics (library + bench), run the controls, or print the registry")
-    mp.add_argument("action", choices=["list", "control", "markdown"])
+    mp = sub.add_parser("metrics", help="list metrics (library + bench), show this bench's checks for the user to choose from (plan), run the controls, or print the registry")
+    mp.add_argument("action", choices=["list", "plan", "control", "markdown"])
     mp.add_argument("bench")
     mp.set_defaults(fn=cmd_metrics)
     rp = sub.add_parser("recipes", help="list recipe files, or extract inline recipes into files")

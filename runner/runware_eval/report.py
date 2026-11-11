@@ -763,7 +763,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     if cov:
         chip = {"limit": "<span class='chip ok'>measured, with a limit</span>",
                 "measured": "<span class='chip na'>measured, no limit</span>",
-                "none": "<span class='chip bad'>not measured</span>"}
+                "none": "<span class='chip bad'>not measured</span>",
+                "dropped": "<span class='chip na'>left out by choice</span>"}
         holes = sum(1 for r in cov if r["status"] != "limit")
         out.append("<section>" + sec_head(
             "What the brief asks",
@@ -772,7 +773,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "them fully, so judge those by eye." if holes else "Every requirement has a check with a limit."))
             + "<div class='tablewrap'><table><thead><tr><th>Requirement</th><th>Measured by</th><th></th></tr></thead><tbody>"
             + "".join(f"<tr><td>{e(r['need'])}</td><td>"
-                      + (e(", ".join(c["label"] + ("" if c["known"] else " (missing)") for c in r["checks"])) or "—")
+                      + (e(", ".join(c["label"] + ("" if c["known"] else " (missing)") for c in r["checks"])) or e(r.get("why") or "—"))
                       + f"</td><td>{chip[r['status']]}</td></tr>" for r in cov)
             + "</tbody></table></div></section>")
 

@@ -66,7 +66,8 @@ plays two clips side by side on one clock and draws each per-frame measurement o
 four written for one bench.
 
 A bench lists what the brief asks (`requirements`) and which checks answer each part. A requirement
-nothing measures, or that has no limit, is printed before a run and shown in the report, so a hole in
+nothing measures stops a paid run (the agent writes a metric for it, or the user leaves it out on purpose),
+one with no limit is printed before a run, and both are shown in the report, so a hole in
 the bench is visible instead of silently missing from the standings. When no stock metric measures a
 requirement, the agent writes one for the bench.
 

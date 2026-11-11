@@ -140,9 +140,12 @@ def check(vals, opt):
     m = re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
     if m:
         tests.append(v >= float(m.group(2)) if m.group(1) == ">=" else v <= float(m.group(2)))
+    if not tests and opt.get("id") in YES_NO and isinstance(vals.get("yes"), bool):
+        return vals["yes"]  # a yes/no question is its own limit: yes passes
     return all(tests) if tests else None
 
 
+YES_NO = ("vlm_checklist", "vlm_same_object")  # judge checks that answer yes or no: pass/fail without a number
 LIMIT_KEYS = ("min", "max", "max_px", "aspect_tolerance", "abs_max", "mean_max", "p95_max", "dL_min", "dL_max")
 
 
@@ -153,13 +156,14 @@ def row_mode(spec, opt):
     if spec.get("mode"):
         return spec["mode"]
     limited = any(k in opt for k in LIMIT_KEYS) or re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
-    return "gate" if limited else "rank"
+    return "gate" if limited or opt.get("id") in YES_NO else "rank"
 
 
 def coverage(b):
     """`requirements` in bench.yaml lists what the brief asks, each with the labels of the checks that
     measure it. Returns (rows, warnings): a requirement nothing measures, or that has no limit, is a
-    hole a recipe can fall through unnoticed."""
+    hole a recipe can fall through unnoticed. A requirement the user chose to leave out says so
+    (`notMeasured: <why>`) and is listed as such; `coverage_errors` names the holes that stop a run."""
     limits = {}
     for spec in (b.get("evaluate") or {}).values():
         for opt in spec.get("metrics", []):
@@ -173,13 +177,16 @@ def coverage(b):
         names = (r.get("checks") or []) if isinstance(r, dict) else []
         checks = [{"label": n, "known": n in limits, "limit": limits.get(n, False)} for n in names]
         known = [c for c in checks if c["known"]]
-        status = "limit" if any(c["limit"] for c in known) else "measured" if known else "none"
-        rows.append({"need": need, "checks": checks, "status": status})
+        why = r.get("notMeasured") if isinstance(r, dict) else None
+        status = "limit" if any(c["limit"] for c in known) else "measured" if known else "dropped" if why else "none"
+        rows.append({"need": need, "checks": checks, "status": status, "why": why if status == "dropped" else None})
         for c in checks:
             if not c["known"]:
                 warn.append(f"requirement '{need}' names a check that is not in `evaluate`: {c['label']}")
         if status == "none":
             warn.append(f"nothing measures: {need}")
+        elif status == "dropped":
+            warn.append(f"left out by choice ({why}): {need}")
         elif status == "measured":
             warn.append(f"measured, but no limit (cannot fail a recipe): {need}")
     if limits and not any(limits.values()):
@@ -190,6 +197,44 @@ def coverage(b):
             if n not in used:
                 warn.append(f"check '{n}' is not tied to any requirement")
     return rows, warn
+
+
+def coverage_errors(b):
+    """Holes that are a mistake in the bench, not a choice: a requirement with no check (every
+    requirement gets a metric, written for it if the library has none), and a requirement that names a
+    check `evaluate` does not have. A paid run does not start with these."""
+    rows, _ = coverage(b)
+    out = [f"nothing measures: {r['need']}" for r in rows if r["status"] == "none"]
+    out += [f"'{r['need']}' names a check that is not in `evaluate`: {c['label']}"
+            for r in rows for c in r["checks"] if not c["known"]]
+    return out
+
+
+def plan(b, reg):
+    """The bench's checks, one row each, for the user to choose from: which requirement it answers,
+    whether the metric was written for this bench or comes from the library, and what fails it."""
+    need_of = {}
+    for r in b.get("requirements") or []:
+        for n in (r.get("checks") or []) if isinstance(r, dict) else []:
+            need_of.setdefault(n, []).append(r.get("need", ""))
+    rows = []
+    for dim, spec in (b.get("evaluate") or {}).items():
+        for opt in spec.get("metrics", []):
+            m = reg.get(metric_id(opt)) or {}
+            if opt.get("id") in JUDGED:  # built in, not a metric file
+                m = {"source": "library", "meta": {"trust": "judge", "description": {
+                    "vlm_checklist": "Yes/no questions put to the vision judges; passes when most judges say yes to every question.",
+                    "vlm_same_object": "The vision judges are asked whether the output shows the same object as the input; passes when most say yes.",
+                    "vlm_rubric": "The vision judges score the output on a scale against a written rubric."}[opt["id"]]}}
+            limit = ", ".join(f"{k} {opt[k]}" for k in LIMIT_KEYS if k in opt)
+            if not limit and opt.get("id") in YES_NO:
+                limit = "yes on every question"
+            rows.append({"label": label(opt), "id": metric_id(opt), "dimension": dim,
+                         "origin": {"bench": "written for this bench", "library": "library"}.get(m.get("source"), m.get("source") or "unknown"),
+                         "trust": (m.get("meta") or {}).get("trust", ""), "limit": limit or "none (measured only)",
+                         "needs": need_of.get(label(opt), []), "what": (m.get("meta") or {}).get("description", ""),
+                         "questions": opt.get("questions") or []})
+    return rows
 
 
 NAMES = {

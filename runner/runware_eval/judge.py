@@ -128,7 +128,9 @@ class Panel:
         grid = np.array(grid)
         agreement = float(np.mean([grid[:, i].all() or (~grid[:, i]).all() for i in range(grid.shape[1])]))
         per_q = {questions[i]: float(grid[:, i].mean()) for i in range(grid.shape[1])}
-        return {"value": float(grid.mean()), "judges": per_judge, "agreement": agreement, "per_question": per_q,
+        # the verdict: yes when, on every question, more judges said yes than no
+        yes = bool((grid.mean(axis=0) > 0.5).all())
+        return {"value": float(grid.mean()), "yes": yes, "judges": per_judge, "agreement": agreement, "per_question": per_q,
                 "answered": len(grid), "asked": len(rows)}
 
     def rubric(self, rubric, images, intro, scale=(1, 5)):
@@ -208,7 +210,8 @@ def run_combined(panel, prepared, opts):
             out.append({"value": float("nan"), "note": "no judge answered"})
             continue
         g = np.array(list(sub.values()))
-        out.append({"value": float(g.mean()), "judges": {j: float(np.mean(v)) for j, v in sub.items()},
+        out.append({"value": float(g.mean()), "yes": bool((g.mean(axis=0) > 0.5).all()),
+                    "judges": {j: float(np.mean(v)) for j, v in sub.items()},
                     "agreement": float(np.mean([g[:, i].all() or (~g[:, i]).all() for i in range(g.shape[1])])),
                     "per_question": {questions[s0 + i]: float(g[:, i].mean()) for i in range(g.shape[1])}})
     return out

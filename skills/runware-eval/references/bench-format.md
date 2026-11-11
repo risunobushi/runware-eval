@@ -13,7 +13,7 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `inputs` | Files or URLs. Each may carry its own `region` masks and expected `text`. A `.txt` or `.md` file is a text input; `reference`, `terms` and `banned` are per-input facts for the text checks (see "Task types"). |
 | `regions` | Named masks: a file path, or `auto:<model AIR>` to generate one on Runware (e.g. BiRefNet). |
 | `evaluate` | The dimensions the user chose. Per dimension: `metrics` (ids from `metrics.md`). A metric with a limit (`min`, `max`, `max_px`, `abs_max`, `mean_max`, `p95_max`, `dL_min`, `dL_max`, `aspect_tolerance`) is a pass/fail check; one without is measured only. Both count in the report: recipes are sorted by failed checks, then by average place on the measurements, then by cost. No `mode` is needed (a dimension-wide `mode: gate` or `mode: rank` from older benches still works). |
-| `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `estimate` and `run` warn about a requirement nothing measures or that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
+| `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `run` stops on a requirement nothing measures (unless it carries `notMeasured: "<why>"`, the user's choice) and warns about one that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
 | `calibration` | For judge or aesthetic metrics: how many outputs the user labels. |
 | `budget` | `maxSpend`: the most one full run may spend, in USD. The runner refuses to start above it. Not the Model Router's `maxPrice`, which is a ceiling for one request. |
 | `draws` | How many times each recipe runs on each input in the full run (default 3); the smoke round runs one. No seed is sent unless a recipe has `seed: $seed`, so every draw is a new generation: see "Draws and seeds". |
@@ -94,6 +94,17 @@ A recipe's `size` block fits the input to a model's limits: `size: { multiple: 1
 maxMp: 4.19 }`. Check each schema for its own limits and write them here.
 
 ## What is checked before a run
+
+**Requirements.** Every entry of `requirements` needs at least one check that exists in `evaluate`.
+`estimate` prints the ones that have none (`x nothing measures: ...`) and `run` stops before spending.
+The only way past it is the user's choice, written down: `notMeasured: "<why>"` on that requirement.
+A requirement whose checks have no limit is printed as a warning (`!`) and does not stop a run.
+
+**Yes/no judge checks** (`vlm_checklist`, `vlm_same_object`) pass or fail without a number: the check
+passes when, on every question, more judges say yes than no. A `min` next to one (share of yes answers,
+as older benches have) is used instead when present.
+
+**Parameters.**
 
 `estimate` and `run` validate one request per recipe (and its `then` step) against the model's published
 JSON Schema, after every placeholder is filled in:
