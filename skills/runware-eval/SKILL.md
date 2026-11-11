@@ -29,7 +29,8 @@ tell from a read-only check.
 
 > **runware-eval** answers "which Runware model is best for my task?" with a bench you can re-run:
 > your inputs, a set of recipes (model, settings, prompt, mask) and the checks that measure your
-> definition of good. Images, 3D models and video are supported.
+> definition of good. Images, video, 3D models, upscaling, background removal, masking, vectorizing,
+> captions and text are supported.
 >
 > **To start**, describe the task in plain words, e.g. "which model is best for relighting product
 > photos?". I will then:
@@ -183,7 +184,7 @@ Metrics are files, like recipes: a curated library ships with the runner (listed
 what this bench can use.
 
 **Start from the brief, not from the library.** The library covers common cases (a product that must
-not change, video stability, mesh facts). Many briefs are about something else (an illustration
+not change, video stability, mesh facts, outlines of cut-outs and masks, vector files, text). Many briefs are about something else (an illustration
 style, a layout, a character across several images), and even a familiar brief usually has one
 requirement no stock metric answers. A requirement without a check is invisible in the report: a
 recipe can fail it completely and still come first. So, before choosing any metric:
@@ -268,8 +269,9 @@ parallel with metric sign-off. Propose recipes only after sign-off. Add `-F json
 out of what you parse (`2>/dev/null`): a `Showing N of M results` footer goes there.
 
 1. **Search:** `runware model search --source official --capabilities <cap> --limit 100`. Tags are
-   `io:<from>-to-<to>` (e.g. `io:image-to-video`, `io:image-to-3d`) and `op:<operation>` (e.g.
-   `op:edit`, `op:inpaint`); repeat `--capabilities` to combine. If unsure of a tag, search without
+   `io:<from>-to-<to>` (e.g. `io:image-to-video`, `io:image-to-3d`, `io:image-to-text`,
+   `io:text-to-text`) and `op:<operation>` (e.g. `op:edit`, `op:inpaint`, `op:upscale`,
+   `op:remove-background`, `op:mask`, `op:vectorize`, `op:caption`); repeat `--capabilities` to combine. If unsure of a tag, search without
    it and read the results' `capabilities`. The default limit is 20 and truncates silently.
 2. **Status and price:** `runware model pricing <air> -F json` gives `status` (keep `live` only) and
    the model's slug (`model`). It only lists a few example configurations; the real rates per unit
@@ -375,7 +377,16 @@ judges only questions no pixel check can answer. 3D outputs (GLB) and video
 outputs (MP4) need nothing extra: the runner renders or reads them into images first, see the 3D and
 video sections of `references/metrics.md`. For video recipes set `taskType: videoInference`, pass the
 start image in `inputs.frameImages`, switch audio and prompt rewriting off, and give `price`
-(USD per output; video is priced per second). Metrics marked `planned` in the
+(USD per output; video is priced per second). Upscalers, background removers, masking models,
+vectorizers, captioners and text models are benched the same way: set the recipe's `taskType`
+(`upscale`, `removeBackground`, `imageMasking`, `vectorize`, `caption`, `textInference`) and pick the
+checks from the matching section of `references/metrics.md`; what each recipe sends is in "Task types"
+in `references/bench-format.md`. Three things to settle with the user for these: a background-removal
+or masking bench needs a **reference outline** they trust for each input (ask for it, or make one and
+have them correct it; never from a model under test); a text bench needs its **inputs as text files**
+and, per input, what a good answer must contain or must not say; and text answers are **judged by text
+models**, so keep the models under test off the judge panel. Audio, prompt enhancement and ControlNet
+preprocessing are not supported yet: say so instead of improvising. Metrics marked `planned` in the
 registry (OCR) show as *not run* in the report. Say so; never present them as passed.
 
 **Before reporting, check the limits and the standings against the outputs.** A check that every

@@ -13,6 +13,7 @@ from PIL import Image
 from ._assets import CSS, FONTS
 from .report import e, uri
 from .bench import stem
+from .score import input_rgb
 
 PAGE_CSS = """
 .task{display:grid;gap:14px}.row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
@@ -75,8 +76,7 @@ def build(b, out_dir, pairs_per_recipe=4, seed=7, px=640):
     scored = data["scored"]
     rng = random.Random(seed)
     inputs = {stem(i["path"]): i for i in b["inputs"]}
-    originals = {k: uri(Image.open(os.path.join(b["_dir"], inputs[k]["path"])).convert("RGB"), px, 82)
-                 for k in {s["input"] for s in scored}}
+    originals = {k: uri(input_rgb(b, inputs[k])[0], px, 82) for k in {s["input"] for s in scored}}
     img = {}
     for s in scored:
         path = os.path.join(out_dir, s.get("view") or s["file"])

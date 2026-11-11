@@ -7,6 +7,10 @@ Every task goes out with `deliveryMethod: async`: Runware acknowledges it at onc
 fetched with `getResponse`. No connection is held open while a model works, so a dropped connection
 cannot leave a paid task in doubt, and an interrupted run can fetch its results later by task UUID.
 Verified on image, 3D, background removal and text inference (2026-11-10).
+
+What a result carries depends on the task: `imageURL` (images, upscale, background removal, and
+vectorize, where the image is an SVG), `videoURL`, `maskImageURL` (imageMasking), `text` (caption and
+textInference, which have no file to download) or `outputs.files` (3D).
 """
 import json
 import os
@@ -139,7 +143,7 @@ def _wait(uid, data, errors, t0, poll_every, max_wait):
             return {"status": "error", "error": _error_text(err), "latency_s": round(time.time() - t0, 1)}
         item = next((d for d in data if d.get("taskUUID") == uid), None)
         if item and item.get("status") not in ("processing", "pending") and any(
-                k in item for k in ("imageURL", "videoURL", "audioURL", "text", "outputs")):
+                k in item for k in ("imageURL", "videoURL", "audioURL", "maskImageURL", "text", "outputs")):
             return {"status": "success", **item, "latency_s": round(time.time() - t0, 1)}
         if item and item.get("status") == "error":
             return {"status": "error", "error": item.get("error", "task failed"),
@@ -173,7 +177,7 @@ def model_schema(air):
     if _INDEX is None:
         req = urllib.request.Request("https://runware.ai/docs/models/index.json", headers={"User-Agent": UA})
         _INDEX = json.load(urllib.request.urlopen(req, timeout=60))
-    entry = next((m for m in _INDEX if m.get("air") == air), None)
+    entry = next((m for m in _INDEX if air in (m.get("air"), m.get("id"))), None)  # text models are listed by id
     if not entry:
         return None
     req = urllib.request.Request(entry["schema"], headers={"User-Agent": UA})

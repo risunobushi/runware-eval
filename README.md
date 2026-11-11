@@ -54,7 +54,9 @@ uv run --project runner runware-eval report   bench.yaml --round full --notes no
 uv run --project runner runware-eval calibrate bench.yaml --round full --labels labels.json   # labels exported from the report
 ```
 
-**Outputs.** Images are scored directly. 3D models (GLB) are rendered to the view that matches the
+**Outputs.** Images are scored directly. Upscaled pictures are also read at their own size; a
+background removal or a mask is compared with a reference outline; an SVG is rendered and its file read
+(shapes, nodes, embedded bitmaps); captions and text answers are checked as text and by the judge panel. 3D models (GLB) are rendered to the view that matches the
 input photo; videos (MP4) are read into frames: the first frame is compared with the input, and
 video checks (motion, frozen frames, scene changes, flicker, colour drift, texture stability, sharpness
 over time, black bars) read the whole clip. The report

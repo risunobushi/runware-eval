@@ -1,7 +1,7 @@
 """Load a bench.yaml, upload its media once, and resolve recipe placeholders into API tasks.
 
 Placeholders in recipe params:
-  $input                     the input's media URL
+  $input                     the input's media URL (for a text input, .txt or .md: its content)
   $input.width / .height     input size, adjusted by the recipe's `size` block
   $input.width_16[_max2048]  legacy form: multiple of 16, optional longest-side cap
   $seed                      the current seed
@@ -18,6 +18,9 @@ import uuid
 
 import yaml
 from PIL import Image
+
+from . import text as textmod
+from .adapters import DRAW_TYPES
 
 
 def _fix_bool_keys(o):
@@ -83,6 +86,9 @@ def upload(full, key, lock_path):
 def ensure_media(b, lock_path):
     """Upload every input and media reference once, and attach `_url` and `_size` to each entry."""
     for entry in media_entries(b).values():
+        if textmod.is_text(entry["path"]):  # a text input is sent as text, never uploaded
+            entry["_text"] = textmod.read(os.path.join(b["_dir"], entry["path"]))
+            continue
         rec = upload(os.path.join(b["_dir"], entry["path"]), entry["path"], lock_path)
         entry["_url"], entry["_size"] = rec["url"], (rec["width"], rec["height"])
         b["_url_sha"][rec["url"]] = rec["sha1"]
@@ -105,8 +111,13 @@ def resolve(value, ctx):
     if not isinstance(value, str) or not value.startswith("$"):
         return value
     token = value[1:]
-    if token == "input":
-        return ctx["input"]["_url"]
+    if token in ("input", "input.text"):
+        inp = ctx["input"]
+        if "_text" in inp:
+            return inp["_text"]
+        if token == "input.text":
+            raise ValueError(f"$input.text needs a text input (.txt or .md), not {inp['path']}")
+        return inp["_url"]
     if token == "seed":
         return ctx["seed"]
     if token == "prev":
@@ -134,7 +145,7 @@ def resolve(value, ctx):
         return w if m.group(1) == "width" else h
     media = media_entries(ctx["bench"])
     if token in media:
-        return media[token]["_url"]
+        return media[token]["_text"] if "_text" in media[token] else media[token]["_url"]
     raise ValueError(f"Unknown placeholder {value}")
 
 
@@ -200,6 +211,10 @@ def jobs(b, round_name, only_inputs=None, only_recipes=None):
                     # the router may pick a different model on every call: each seed is its own draw,
                     # never a cache hit on another seed's result
                     base = hashlib.sha1(json.dumps([content_key(b, task), "draw", seed]).encode()).hexdigest()[:20]
+                elif task["taskType"] in DRAW_TYPES and "$seed" not in json.dumps(r.get("params", {})):
+                    # tools and text models mostly take no seed: each seed is then one more call of the
+                    # same request (its own cache key), which shows how much the answer varies
+                    base = hashlib.sha1(json.dumps([base, "draw", seed]).encode()).hexdigest()[:20]
                 pipeline = bool(r.get("then") or r.get("post"))
                 key = base if not pipeline else hashlib.sha1(json.dumps(
                     [base, r.get("_fp"), inp.get("regions")], sort_keys=True, default=str).encode()).hexdigest()[:20]

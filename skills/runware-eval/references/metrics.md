@@ -163,6 +163,127 @@ on video, because the output has no product mask of its own. Identity in later f
 the same product after it turned?) has no pixel check yet: use the frame strip and the labeling
 page. Thresholds for the video checks come from synthetic clips; calibrate them on a labeled run.
 
+## Upscaled pictures (`upscale`)
+
+An upscaled picture is compared with its input twice: shrunk back to the input's size by the image
+checks above ("is it still the same picture?"), and at its own size by the upscale checks ("did it
+gain anything?").
+
+| id | unit | notes |
+|---|---|---|
+| `upscale_factor` | × input | delivered width and height over the input's. Gate with `min` just under the factor asked for |
+| `upscale_detail_gain` | × plain resize | fine detail at the output's own size against the input enlarged by plain resampling; 1.0 = no more than a resize. It counts invented texture as detail: in a full run the two upscalers with the highest gain (18 and 42) were the two furthest from the real photo. Never a limit on its own |
+| `upscale_truth_ssim` | SSIM, higher | needs ground truth: give each input an `original:` (the full-size picture) and use that picture shrunk as the input. Compares the result with the original at the original's size, and reports what a plain resize scores (`plain_resize`, `over_plain_resize`). The only check that tells recovered detail from invented detail |
+| `upscale_truth_psnr` | dB, higher | the same comparison as pixel error. Stricter than SSIM about texture that is sharp but not the original's |
+| `size_aspect`, `phase_correlation` | | run these first. Seen on Runware: a 1366x1800 input came back as 2688x3584 from two upscalers (the input is cut to a multiple of 64 before upscaling), which fails both and drags every fidelity value down |
+| `ssim_region`, `deltaE2000_region` | | fidelity at the input's size, inside a region. Upscalers that redraw texture lower SSIM without changing what the product is: calibrate the limit on a labeled run |
+
+Ground truth is the baseline to build an upscale bench on: take full-size pictures of the kind you will
+upscale, shrink them by the factor under test (`original:` on the input points at the full-size one),
+and upscale the small ones. Limits to say out loud, from a full run of eight upscalers on three product
+photos: (1) on inputs shrunk by plain resampling, a plain resize back is hard to beat on SSIM and PSNR
+(only one of eight upscalers did, by 0.01 to 0.02 SSIM); both reward a soft but faithful picture over a
+crisp one, so they rank faithfulness, not how good it looks: add a `vlm_rubric` or labels for that.
+(2) Real small pictures are degraded in other ways than a clean shrink (compression, noise); shrink
+them the way yours were made if you know it. (3) Several upscalers do not return exactly the size
+asked: inputs whose sides are not multiples of 64 came back cut (two models) or resized (two others),
+one model returned 1.91x to 2.06x; `upscale_factor`, `size_aspect` and `phase_correlation` catch it.
+(4) Prices grow with the input's size and were up to 13x the listed top price on a 1366x1800 input:
+smoke one large input before a full round.
+
+## Cut-outs and masks (`removeBackground`, `imageMasking`)
+
+The output is an outline: the alpha channel of a cut-out, or the mask itself. Every check compares it
+with a reference outline of the same input (`regions`, named by `region:` on the check), at the
+input's size. No vision judge is needed for the outline; ask judges only about what an outline cannot
+say (a halo's colour, a missing shadow).
+
+| id | unit | notes |
+|---|---|---|
+| `mask_iou` | 0–1, higher | overlap with the reference. Forgiving on big shapes: a lost strap barely moves it |
+| `mask_missing` | share of the reference, lower | how much of the subject was cut away. Tested on a bag: 0.011 for a clean cut, 0.112 for one that lost the strap |
+| `mask_extra` | share of the reference, lower | background kept or selected. A cut-out delivered without transparency keeps the whole frame |
+| `mask_boundary_px` | px, lower | mean distance between the two outlines (also p95): a ragged or shifted edge. 0.5 px for the clean cut, 158 px for the lost strap |
+| `alpha_edge_softness` | px | width of the semi-transparent edge of a cut-out, counted near the outline only: about 0 is a hard edge, 1–3 clean anti-aliasing, more a soft matte or a halo. No better direction: do not limit it without labels |
+| `alpha_opacity` | mean alpha, higher | how solid the cut-out is inside the reference region, away from the edge. Seen: 1.000 and 0.996 for most removers, 0.980 for one that left the whole subject faintly see-through. Gate with `min: 0.99` |
+| `size_kept` | × input, higher | delivered size over the input's. Seen: every background remover returned a 1920x2560 input at 1536x2048 (0.8). Gate with `min: 1` when the cut-out must keep the photo's resolution |
+| `mask_pieces` | pieces, lower | separate pieces of the cut-out or mask (no reference needed): one product is one piece; more means stray islands or a subject cut apart. Also `holes` and `largest_share` |
+| `mask_selected_share` | share of the frame | how much the cut-out keeps or the mask selects (no reference needed). 0 = nothing was found, 1 = nothing was removed |
+| `mask_box_fill` | share of its box | 1.0 = the mask is a plain rectangle. Seen: the YOLO face, hand and "person seg" masks are all boxes (0.96 to 1.0); the MediaPipe meshes are traced shapes (0.3 to 0.6). Gate with `max: 0.95` when an outline is needed |
+| `mask_inside` | share of the mask, higher | how much of the mask lies inside a region: for a mask of a part (face, hands), checked against the outline of the whole person. Not a substitute for a reference of the part itself |
+
+Limits to say out loud: the reference outline decides everything, so a reference made by a model
+favours that model and its relatives (in a full run of eleven removers the reference's own model scored
+exactly 1.000 on three of four inputs, and so did a second listed model that returned the same outline).
+A mask of a part needs a reference of that part: give the input a box (`regions: { face: { box: [...] } }`)
+and name it on the check; against the whole person, overlap and missing say nothing. Limits are the same
+for every input, so "an empty mask on a photo without a person" cannot be a gate next to "a full mask on
+a photo with one": bench the two kinds of input separately, or read `mask_selected_share` per input. Masking models on Runware detect faces, hands and people; on
+anything else they return a box (seen on a bag: `mask_extra` 2.7).
+
+## Vector files (`vectorize`)
+
+The runner renders the SVG on white at the input's width (the renderer ships with the runner), so the
+image checks above compare the drawing with the input. The file checks read the SVG itself:
+
+| id | unit | notes |
+|---|---|---|
+| `svg_images` | bitmaps | embedded pictures. Above 0 it is a picture in an SVG wrapper: gate with `max: 0` |
+| `svg_shapes` | shapes | paths, rectangles, circles ... Fewer is easier to edit |
+| `svg_nodes` | nodes | anchor points over all shapes: how heavy the drawing is |
+| `svg_colours` | colours | distinct fills and strokes; hundreds means gradients traced into steps |
+| `svg_file_kb` | KB | file size |
+
+Tested on a product photo: two vectorizers both looked like the input (SSIM 0.96 and 0.97) while one
+used 146 shapes and 2,527 nodes and the other 537 and 11,032: the file checks are what tells them
+apart. On a flat four-colour logo two of three vectorizers returned exactly four colours and 18
+shapes; the third returned 8 colours (fringes traced as shapes): for logos, compare `svg_colours` with
+the number of colours you drew. `phase_correlation` does not run on vector outputs (no product outline is
+made for them). All three traced the backdrop as a shape: none returned a transparent background.
+An SVG the renderer cannot open is kept, its file checks run, and its picture checks show as
+*not run*.
+
+## Text (`caption`, `textInference`)
+
+The output is the text. Deterministic checks read it directly; everything about meaning goes to the
+judges.
+
+| id | unit | notes |
+|---|---|---|
+| `text_words` | words | length; gate both sides (`min`, `max`) when the brief sets one |
+| `text_sentences` | sentences | for "one sentence" or "at most three": gate with `max` |
+| `text_terms` | share found, higher | required words, from `terms:` on the check or on the input |
+| `text_banned` | terms found, lower | forbidden words (filler, claims you may not make), from `banned:`. Gate with `max: 0` |
+| `text_regex` | 1 / 0 | `pattern:` found in the text: a fixed format |
+| `text_json` | 1 / 0 | valid JSON, with every key in `keys:`. A Markdown code fence around it is forgiven and reported (`fenced`); `strict: true` reads the answer as delivered, the way `json.loads` would. Seen: one of five text models fenced every answer, another two of three |
+| `text_reasoning_leak` | words, lower | reasoning the model left in its answer (`<think>` blocks). Seen: one of five models, 250 words per answer. The other text checks read the answer without it; gate this one with `max: 0` if you use answers as delivered |
+| `text_reference_f1` | F1, higher | shared words with the input's `reference:` text. It rewards the same words, not the same meaning: never the only content check |
+| `text_truncated` | 1 / 0 | cut off by the token limit (`textInference` only). Gate with `max: 0` |
+| `text_output_tokens` | tokens, lower | what the answer cost to write (`textInference` with `includeUsage: true`) |
+
+`field: <name>` on `text_words`, `text_sentences`, `text_terms`, `text_banned`, `text_regex` and
+`text_reference_f1` reads one field of a JSON answer instead of the whole text
+(`{ id: text_words, field: title, max: 8 }`). Use it for anything countable: do not ask a judge whether
+a title has at most 8 words.
+
+`vlm_checklist` and `vlm_rubric` work on text: the judges get the input (the picture for a caption,
+the text for a text input), the `task` from bench.yaml and the answer, and questions are asked about
+"the TEXT" ("Is everything the TEXT says visible in image 1?", "Is every fact in the TEXT supported by
+the INPUT?"). Set `judgeWhen: { maxFailedChecks: 99 }` when the text checks are few, so every answer
+is judged. Tested on a product photo: two captioners both called a nylon bag "leather"; no word check
+caught it, the checklist did (and the three judges disagreed on it: read `agreement`).
+
+What a full run showed about captions (four captioners, four photos, three seeds): none passed a
+two-question checklist on any photo; all three language models called a nylon bag leather; the CLIP
+interrogator returns a list of tags, with invented artist and person names, not a sentence. Answers were
+the same on every seed for 11 of 16 model and photo pairs, and each call was billed: use `seeds: [1]`
+for captioners. Nothing here measures whether seeds differ; read the outputs.
+
+Limits to say out loud: picture checks do not run on text, and text checks do not run on pictures
+(both show as *not run*). There are no controls for a text input. The judges are text models
+themselves: do not let a model under test sit on the panel that judges it (set `judges:`); the report
+warns when one does.
+
 ## Ops — always on
 
 | id | unit | source |

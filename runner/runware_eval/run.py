@@ -16,6 +16,7 @@ from . import bench as benchmod
 from .score import input_region
 
 MASK_MODEL = "runware:112@5"  # BiRefNet General
+OWN_OUTLINE = ("removeBackground", "imageMasking")
 
 
 GRACE_S = 1800  # a task sent less than this long ago may still be running on Runware
@@ -135,9 +136,10 @@ def estimate(jobs, results):
     return rows
 
 
-def mask_from(url, path):
-    """Product mask (white = product) via background removal on Runware."""
-    res = api.run_task({"taskType": "removeBackground", "taskUUID": str(uuid.uuid4()), "model": MASK_MODEL,
+def mask_from(url, path, model=None):
+    """Product mask (white = product) via background removal on Runware (`model`: an AIR, else MASK_MODEL)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    res = api.run_task({"taskType": "removeBackground", "taskUUID": str(uuid.uuid4()), "model": model or MASK_MODEL,
                         "inputs": {"image": url}, "outputFormat": "PNG", "includeCost": True})
     if res["status"] != "success":
         raise RuntimeError(f"Mask failed: {res.get('error')}")
@@ -338,16 +340,27 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
             row["resumed"] = True
         if j["model"] == benchmod.ROUTER and res.get("model"):
             row["picked_model"] = res["model"]  # the response names the model the router chose
+        row["task_type"] = j["task"].get("taskType")
         if res["status"] == "success":
             files = (res.get("outputs") or {}).get("files") or []
-            url = res.get("imageURL") or res.get("videoURL") or (files[0]["url"] if files else None)
+            url = (res.get("imageURL") or res.get("videoURL") or res.get("maskImageURL")
+                   or (files[0]["url"] if files else None))
+            if not url and isinstance(res.get("text"), str):
+                # caption and textInference answer with text, not a file: the text is the output
+                row["file"] = f"{j['input']}__{j['recipe']}__s{j['seed']}.txt"
+                with open(os.path.join(out_dir, row["file"]), "w", encoding="utf8") as f:
+                    f.write(res["text"])
+                row.update({k: res[k] for k in ("finishReason", "usage") if res.get(k) is not None})
+                return row
             if not url:
-                return {**row, "status": "error", "error": "no output URL in the response"}
+                return {**row, "status": "error", "error": "no output URL or text in the response"}
             ext = os.path.splitext(url.split("?")[0])[1] or ".png"
             row["file"] = f"{j['input']}__{j['recipe']}__s{j['seed']}{ext}"
             row["url"] = url
             api.download(url, os.path.join(out_dir, row["file"]))
-            if ext.lower() in (".png", ".jpg", ".jpeg", ".webp"):  # 3D outputs get masks from their renders
+            # a product outline for the outline checks, made on Runware. Not for 3D and vector outputs (no
+            # picture to cut), nor for cut-outs and masks: those are their own outline (see adapters.py)
+            if ext.lower() in (".png", ".jpg", ".jpeg", ".webp") and row["task_type"] not in OWN_OUTLINE:
                 try:
                     row["eval_cost"] = mask_from(url, os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
                 except RuntimeError as e:
@@ -420,7 +433,7 @@ def ensure_input_masks(b, out_dir):
             if isinstance(spec, str) and spec.startswith("auto:"):
                 target = os.path.join(out_dir, "masks", f"{os.path.splitext(os.path.basename(inp['path']))[0]}_{name}.png")
                 if not os.path.exists(target):
-                    mask_from(inp["_url"], target)
+                    mask_from(inp["_url"], target, spec[len("auto:"):].strip() or None)
                 inp["regions"][name] = os.path.abspath(target)  # absolute: out_dir may be on another drive
 
 

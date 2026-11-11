@@ -15,7 +15,8 @@ from skimage.color import deltaE_ciede2000, rgb2lab
 from . import _labeling, catalog
 from ._assets import CSS, FONTS
 from .bench import ROUTER, stem
-from .score import JUDGED, Pair, coverage, erode, find_mask, label as metric_label, metric_id
+from . import text as textmod
+from .score import JUDGED, Pair, coverage, erode, find_mask, input_rgb, label as metric_label, metric_id
 
 e = html.escape
 HEAT_MAX = 10.0
@@ -51,14 +52,18 @@ function show(){
   const r = D.items[cur.input + '|' + cur.recipe];
   ba.querySelector('img.before').src = D.originals[cur.input].img;
   const crop = document.getElementById('crop-in'); if (crop) crop.src = D.originals[cur.input].crop || '';
-  if (!r) { ba.querySelector('.after img').removeAttribute('src'); ba.querySelector('.tag.r').textContent = 'no output';
+  if (!r) { document.getElementById('text-panel').hidden = true; ba.querySelector('.after img').removeAttribute('src'); ba.querySelector('.tag.r').textContent = 'no output';
     document.getElementById('kv').innerHTML = '<dt>No output for this combination.</dt>'; return; }
   ba.querySelector('.after img').src = r.img; ba.querySelector('.tag.r').textContent = cur.recipe;
-  document.getElementById('heat').src = r.heat || '';
+  document.getElementById('heat').src = r.heat || ''; document.getElementById('heat-panel').hidden = !r.heat;
   const tp = document.getElementById('turn-panel'); tp.hidden = !r.turn; if (r.turn) { document.getElementById('turn').src = r.turn;
     document.getElementById('turn-title').textContent = r.turn_title || 'Views'; }
   const cp = document.getElementById('clip-panel'), cv = document.getElementById('clip'); cp.hidden = !r.clip;
   if (r.clip) { if (cv.getAttribute('src') !== r.clip) cv.src = r.clip; } else { cv.pause(); cv.removeAttribute('src'); }
+  const xp = document.getElementById('text-panel'), o = D.originals[cur.input]; xp.hidden = r.text == null;
+  if (r.text != null) { document.getElementById('text-out').textContent = r.text;
+    document.getElementById('text-out-cap').textContent = cur.recipe;
+    document.getElementById('text-in-box').hidden = o.text == null; document.getElementById('text-in').textContent = o.text || ''; }
   const co = document.getElementById('crop-out'); if (co) { co.src = r.crop || ''; document.getElementById('crop-out-cap').textContent = cur.recipe; }
   document.getElementById('kv').innerHTML = r.gates.map(g =>
     `<dt>${g.label}</dt><dd class="mono">${g.value}</dd><dd>${g.gate ? chip(g.pass) : ''}</dd>`).join('');
@@ -117,8 +122,20 @@ def fmtv(v):
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return "—"
     if isinstance(v, float):
+        if 0 < abs(v) < 0.001:  # a text answer costs a fraction of a cent: keep its digits
+            return small(v)
         return f"{v:.3f}" if abs(v) < 1 else f"{v:.2f}" if abs(v) < 10 else f"{v:.1f}"
     return str(v)
+
+
+def small(v):
+    """A number below 0.001 written out with two significant digits (0.000078), not in e-notation."""
+    return f"{v:.{1 - int(np.floor(np.log10(abs(v))))}f}"
+
+
+def usd(v, places=4):
+    """A price with `places` decimals; a price too small for them (a text answer) keeps two digits instead."""
+    return f"${small(v)}" if 0 < abs(v) < 10 ** -places * 5 else f"${v:.{places}f}"
 
 
 def gate_rows(item, every=False):
@@ -431,8 +448,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         inp = inputs[k]
         boxes = {n: v["box"] for n, v in (inp.get("regions") or {}).items() if isinstance(v, dict) and "box" in v}
         box = next(iter(boxes.values()), None)
-        rgb_in = Pair(b, inp, os.path.join(b["_dir"], inp["path"]), None).rgb_in
+        rgb_in = input_rgb(b, inp)[0]
         originals[k] = {"img": uri(rgb_in, 900)}
+        if textmod.is_text(inp["path"]):
+            originals[k]["text"] = textmod.read(os.path.join(b["_dir"], inp["path"]))
         if box:
             originals[k]["crop"] = uri(rgb_in[box[1]:box[3], box[0]:box[2]], 640, 90)
             originals[k]["crop_name"] = next(iter(boxes))
@@ -449,7 +468,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         if s.get("latency_s") is not None:
             strip.append(f"{s['latency_s']:.1f}s")
         if s.get("cost") is not None:
-            strip.append(f"${s['cost']:.4f}")
+            strip.append(usd(s["cost"]))
         it = {"img": uri(p.rgb_out, 900), "thumb": uri(p.rgb_out, 360, 80), "gates": gate_rows(s, every=True),
               "strip": " · ".join(x for x in strip if x)}
         try:
@@ -459,6 +478,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         box = next(iter(p.boxes.values()), None)
         if box:
             it["crop"] = uri(p.rgb_out[box[1]:box[3], box[0]:box[2]], 640, 90)
+        if s.get("text") is not None:
+            it["text"] = s["text"]
         if s.get("turntable") and os.path.exists(os.path.join(out_dir, s["turntable"])):
             it["turn"] = uri(Image.open(os.path.join(out_dir, s["turntable"])).convert("RGB"), 1200, 82)
             it["turn_title"] = s.get("turn_title")
@@ -496,7 +517,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     # headline: the recommendation, then what it costs and how many checks it passes.
     # `best` is the first in `order`: fewest failed checks, then best average place, then cheapest
     ab = agg[best]
-    price = f" at <em>${ab['cost']:.3f}</em> per output" if ab["cost"] is not None else ""
+    price = f" at <em>{usd(ab['cost'], 3)}</em> per output" if ab["cost"] is not None else ""
     missed = [k.split(":", 1)[1] for k, v in ab["verdict"].items() if not v]
     # Three things are kept apart in this report: measured values (the same for everyone), the verdict
     # against this bench's thresholds (a judgement for this brief), and the user's own ranking from the
@@ -536,7 +557,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
 
     if cheapest_pass:
         c = agg[cheapest_pass]
-        second = card("Cheapest that passes", f"${c['cost']:.3f}" if c["cost"] is not None else "—",
+        second = card("Cheapest that passes", usd(c["cost"], 3) if c["cost"] is not None else "—",
                       f"{e(cheapest_pass)} · {e(recipes.get(cheapest_pass, {}).get('model', ''))} · {c['cost_src']}")
     elif any_checks:
         second = card("Best still misses", ab["fails"], e(", ".join(missed)))
@@ -573,7 +594,12 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     bad_ctl = [c for c in data.get("controls", []) if not c["ok"]]
     full = max(len(a["items"]) for a in agg.values())
     partial = [f"{rid} ({len(a['items'])} of {full})" for rid, a in agg.items() if len(a["items"]) < full]
-    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial:
+    slug = lambda v: "-".join("".join(c if c.isalnum() else " " for c in str(v).lower()).split())
+    panel = {slug(j) for j in data.get("judges") or []}
+    judged = any(str(m.get("id", "")).startswith("vlm_") and m.get("status") == "ok"
+                 for it in data.get("scored", []) for m in it.get("metrics", []))
+    own_judge = sorted({r["id"] for r in b.get("recipes", []) if isinstance(r, dict) and slug(r.get("model")) in panel}) if judged else []
+    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial or own_judge:
         rows = [note(*split_note(n)) for n in notes.get("findings", [])]
         warns = [note(*split_note(n), warn=True) for n in notes.get("caveats", [])]
         for c in bad_ctl:
@@ -587,6 +613,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         for (rid, inp, err), xs in failed.items():
             warns.append(note(f"<strong>{e(rid)}</strong> failed on {e(inp)}" + (f" ({len(xs)} times)" if len(xs) > 1 else ""),
                               e(err), True))
+        if own_judge:
+            warns.append(note("<strong>Models under test sit on the judge panel</strong>",
+                              f"{e(', '.join(own_judge))}: each of them judged its own answers. Name other models "
+                              "under <code>judges:</code> in bench.yaml, then score again.", True))
         if partial:
             warns.append(note("<strong>Fewer outputs than the other recipes</strong>",
                               f"{e(', '.join(partial))}. Their verdicts rest on less evidence.", True))
@@ -687,7 +717,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             else:
                 title = f" title='place {a['places'][k]:g} of {len(agg)}'" if k in placed else ""
                 cells.append(f"<td{title}>{val}</td>")
-        cost = f"${a['cost']:.4f}" + ("" if a["cost_src"] == "measured" else "*") if a["cost"] is not None else "—"
+        cost = usd(a["cost"]) + ("" if a["cost_src"] == "measured" else "*") if a["cost"] is not None else "—"
         lat = f"{a['latency']:.0f}s" if a["latency"] else "—"
         failed = f"{a['fails']} of {a['checks']}" if a["checks"] else "—"
         by_dim = " · ".join(f"{d.replace('_', ' ')} {p:.1f}" for d, p in a["place_by_dim"].items())
@@ -716,7 +746,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         f"<div class='panel'><h3>{'Checks and measurements' if any_checks else 'Measurements'}</h3>"
         "<dl class='kv' id='kv'></dl></div></div>"
         # everything else sits in a row under the slider, as wide as the page
-        "<div class='below'><div class='panel'><h3>Where the colour changed</h3><img id='heat' alt='Colour drift heatmap'>"
+        "<div class='below'><div class='panel' id='heat-panel'><h3>Where the colour changed</h3><img id='heat' alt='Colour drift heatmap'>"
         "<div class='legend-bar'></div><div class='legend-ticks'><span>0 ΔE (unchanged)</span><span>"
         f"{HEAT_MAX / 2:.0f}</span><span>{HEAT_MAX:.0f}+ ΔE</span></div><p class='muted' style='font-size:12px'>"
         f"Same settings as the first colour check{' (hue and chroma only)' if first_de.get('ignore_lightness') else ''}."
@@ -727,6 +757,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                    "<div class='after'><img id='crop-out' alt='Output crop'></div><div class='bar'></div>"
                    "<div class='knob'>⇆</div><span class='tag l'>original</span>"
                    "<span class='tag r' id='crop-out-cap'></span></div></div>")
+    out.append("<div class='panel wide' id='text-panel' hidden><h3>Text</h3><div id='text-in-box' hidden>"
+               "<div class='strip'>input</div><pre class='textout' id='text-in'></pre></div>"
+               "<div class='strip' id='text-out-cap'></div><pre class='textout' id='text-out'></pre></div>")
     out.append("<div class='panel' id='clip-panel' hidden><h3>Clip</h3><video id='clip' controls loop muted "
                "playsinline style='width:100%;border-radius:var(--r)'></video>"
                + (f"<p class='muted' style='font-size:12px'>{clips_left_out} more clip(s) are in the run folder "

@@ -114,6 +114,8 @@ padding:4px 8px;border-radius:5px;max-width:45%;overflow:hidden;text-overflow:el
 .ba .tag.l{left:10px}.ba .tag.r{right:10px}
 .side{display:grid;gap:12px}
 .panel{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);padding:16px;display:grid;gap:10px}
+#heat-panel{max-width:560px}
+.textout{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.55 var(--mono);color:var(--ink);background:var(--deep);border:1px solid var(--grid);border-radius:5px;padding:12px;max-height:340px;overflow:auto}
 .panel img{width:100%;height:auto;border-radius:5px;display:block}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pair figure{margin:0;display:grid;gap:4px}
 figcaption{font:11.5px var(--mono);color:var(--muted)}

@@ -25,7 +25,20 @@ A metric file is a small Python module with:
     pair.W, pair.H, pair.native size of the input; native size of the output
     pair.boxes                  named boxes of the input
     pair.mesh                   mesh facts for 3D outputs (faces, parts, watertight, texture_px, file_mb), else None
-    pair.m_out                  the output's own product mask, or None when there is none
+    pair.m_out                  the output's own product mask, or None when there is none. For a cut-out
+                                (removeBackground) or a mask (imageMasking) it is the output itself
+    pair.input                  the input's entry in bench.yaml: per-input facts such as `reference`, `terms`
+    text(pair)                  for text outputs (caption, textInference): the text. Raises KeyError otherwise
+    text_part(pair, opt)        the text a text check reads: the answer without reasoning blocks, or, with
+                                `field: <name>` on the check, that field of a JSON answer
+    text_meta(pair, key)        `finishReason` or a `usage` count of a textInference answer
+    words(text)                 lower-case words of a text
+    alpha(pair)                 for cut-outs: the delivered alpha channel, 0..1, at the input's size
+    native_out(pair)            the delivered picture at its own size (uint8 RGB): what upscale checks read
+    svg_value(pair, key)        a fact of a vector output (shapes, nodes, colours, images, file_kb)
+    own_outline(pair)           for cut-outs and masks: the outline the output is (bool, input's size)
+    original(pair, region)      for upscales with ground truth: the input's `original:` picture, the output
+                                at that size and the region at that size
     media(pair, name)           a reference image named at the top level of bench.yaml (a target background, a
                                 style or lighting reference), resized to the input's size
     video_flow(pair)            for video outputs: optical flow between consecutive analysis frames, and the grey frames
@@ -42,8 +55,82 @@ import numpy as np
 from skimage.color import deltaE_ciede2000, rgb2lab
 from skimage.metrics import structural_similarity
 
+from .text import answer, reasoning, unfence, words
+
 __all__ = ["np", "cv2", "rgb2lab", "deltaE_ciede2000", "structural_similarity", "erode", "mesh_value", "video",
-           "out_mask", "video_flow", "media"]
+           "out_mask", "video_flow", "media", "text", "text_meta", "words", "alpha", "native_out", "svg_value",
+           "outline", "own_outline", "original", "plain_resize", "text_part", "answer", "reasoning", "unfence"]
+
+
+def text(pair):
+    """The text of a text output; raises KeyError for anything else ('not run')."""
+    if getattr(pair, "text", None) is None:
+        raise KeyError("not a text output")
+    return pair.text
+
+
+def text_part(pair, opt=None):
+    """What a text check reads. The answer as delivered, minus any reasoning block the model left in it
+    (`text_reasoning_leak` reports those). With `field: title` on the check: that field of a JSON answer
+    (dots go deeper: `product.title`); raises ValueError when the answer is not JSON or has no such field."""
+    import json
+    t = answer(text(pair))
+    field = (opt or {}).get("field")
+    if not field:
+        return t
+    try:
+        data = json.loads(unfence(t)[0])
+    except ValueError:
+        raise ValueError(f"`field: {field}` needs a JSON answer; this one is not valid JSON")
+    for key in str(field).split("."):
+        if not (isinstance(data, dict) and key in data):
+            raise ValueError(f"the JSON answer has no field `{field}`")
+        data = data[key]
+    return data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+
+
+def text_meta(pair, key):
+    """`finishReason`, or a count from `usage` (promptTokens, completionTokens, totalTokens, thinkingTokens),
+    as Runware reported it for a textInference answer. Raises KeyError when the answer did not carry it."""
+    meta = getattr(pair, "text_meta", None) or {}
+    v = meta.get(key, (meta.get("usage") or {}).get(key))
+    if v is None:
+        raise KeyError(f"the result does not say `{key}` (only textInference reports it)")
+    return v
+
+
+def alpha(pair):
+    """The alpha channel a background removal delivered, 0..1, at the input's size."""
+    if not getattr(pair, "alpha_file", None):
+        raise KeyError("not a cut-out (removeBackground output)")
+    from PIL import Image
+    a = Image.open(pair.alpha_file).convert("RGBA").split()[-1]
+    if a.size != (pair.W, pair.H):
+        a = a.resize((pair.W, pair.H), Image.BILINEAR)
+    return np.asarray(a).astype(np.float64) / 255.0
+
+
+def native_out(pair):
+    """The delivered picture at its own size, uint8 RGB. Raises KeyError for outputs that are not a picture."""
+    if any(getattr(pair, k, None) is not None for k in ("text", "svg", "mesh", "video")):
+        raise KeyError("not a picture output")
+    from PIL import Image
+    return np.asarray(Image.open(pair.out_file).convert("RGB"))
+
+
+def svg_value(pair, key):
+    """A fact of a vector output as a metric value; raises KeyError for anything else ('not run')."""
+    if not getattr(pair, "svg", None):
+        raise KeyError("not a vector output")
+    if pair.svg.get("error"):
+        raise ValueError(pair.svg["error"])
+    return {"value": float(pair.svg[key])}
+
+
+def outline(mask):
+    """The edge pixels of a mask (its outline, one pixel wide)."""
+    m = mask.astype(np.uint8)
+    return (m > 0) & ~(cv2.erode(m, np.ones((3, 3), np.uint8)) > 0)
 
 
 def media(pair, name, fit=True):
@@ -100,3 +187,36 @@ def mesh_value(pair, key):
         raise KeyError("not a 3D output")
     v = pair.mesh[key]
     return {"value": (1.0 if v else 0.0) if isinstance(v, bool) else float(v)}
+
+
+def own_outline(pair):
+    """The outline a cut-out or a mask is (bool, at the input's size). Raises KeyError for any other output."""
+    if not getattr(pair, "out_is_outline", False) or pair.m_out is None:
+        raise KeyError("not a cut-out or a mask")
+    return pair.m_out
+
+
+def original(pair, spec=None):
+    """For an upscale bench with ground truth: the input's `original:` file (the full-size picture the
+    input was shrunk from), the delivered picture brought to that size, and the region at that size
+    (the whole frame without `spec`). All uint8 RGB / bool. Raises KeyError without an `original:`."""
+    import os
+    from PIL import Image
+    path = (getattr(pair, "input", None) or {}).get("original")
+    if not path:
+        raise KeyError("this input has no `original:` picture")
+    truth = np.asarray(Image.open(os.path.join(pair.bench["_dir"], path)).convert("RGB"))
+    out = native_out(pair)
+    h, w = truth.shape[:2]
+    if out.shape[:2] != (h, w):
+        out = cv2.resize(out, (w, h), interpolation=cv2.INTER_AREA if out.shape[0] > h else cv2.INTER_CUBIC)
+    m = np.ones((h, w), bool) if not spec else cv2.resize(pair.region(spec).astype(np.uint8), (w, h),
+                                                          interpolation=cv2.INTER_NEAREST) > 0
+    if not m.any():
+        raise ValueError("the region is empty")
+    return truth, out, m
+
+
+def plain_resize(pair, size):
+    """The input enlarged by plain bicubic resampling to `size` (w, h), uint8 RGB: what any upscaler must beat."""
+    return cv2.resize((pair.rgb_in * 255).round().astype(np.uint8), size, interpolation=cv2.INTER_CUBIC)

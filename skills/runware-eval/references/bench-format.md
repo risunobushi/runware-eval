@@ -10,7 +10,7 @@ later means adding one recipe and re-running. Results are cached by a hash of
 |---|---|
 | `goal` | The user's goal in their own words. |
 | `task` | Optional. One short sentence shown under the report's headline as "Task: ...". Without it the report uses the first sentence of `goal`. |
-| `inputs` | Files or URLs. Each may carry its own `region` masks and expected `text`. |
+| `inputs` | Files or URLs. Each may carry its own `region` masks and expected `text`. A `.txt` or `.md` file is a text input; `reference`, `terms` and `banned` are per-input facts for the text checks (see "Task types"). |
 | `regions` | Named masks: a file path, or `auto:<model AIR>` to generate one on Runware (e.g. BiRefNet). |
 | `evaluate` | The dimensions the user chose. Per dimension: `metrics` (ids from `metrics.md`). A metric with a limit (`min`, `max`, `max_px`, `abs_max`, `mean_max`, `p95_max`, `dL_min`, `dL_max`, `aspect_tolerance`) is a pass/fail check; one without is measured only. Both count in the report: recipes are sorted by failed checks, then by average place on the measurements, then by cost. No `mode` is needed (a dimension-wide `mode: gate` or `mode: rank` from older benches still works). |
 | `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `estimate` and `run` warn about a requirement nothing measures or that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
@@ -69,11 +69,11 @@ fingerprint: 8a2fdbe2577bf114   # written by runware-eval; changes when the requ
 
 | Placeholder | Becomes |
 |---|---|
-| `$input` | the input's media URL (uploaded once by the runner, recorded in `media.lock.json`) |
+| `$input` | the input's media URL (uploaded once by the runner, recorded in `media.lock.json`). For a text input (`.txt`, `.md`): its content |
 | `$input.width`, `$input.height` | input size, adjusted by the recipe's `size` block |
 | `$seed` | the current seed |
 | `$prompts.<name>` | a prompt from the top-level `prompts` block |
-| `$<name>` | URL of a top-level media entry, e.g. `lighting_ref: { path: refs/light.png }` |
+| `$<name>` | URL of a top-level media entry, e.g. `lighting_ref: { path: refs/light.png }` (a text file: its content, e.g. `style_guide: { path: refs/tone.md }`) |
 
 URLs are sent, not media UUIDs: some provider-backed models fail to fetch a UUID.
 
@@ -126,6 +126,57 @@ price: 0.08                   # needed when there is no maxPrice: the dearest mo
   unless every candidate has a seed field. Results are cached per seed like any other recipe.
 - **No `then` or `post` steps** on a router recipe yet.
 - `excludedModels` (a list) is the opposite of `allowedModels`; the two cannot be combined.
+
+## Task types: tools and text
+
+A recipe's `taskType` says what kind of task it is (default `imageInference`). Besides images, video
+(`videoInference`) and 3D (`3dInference`), the runner runs and scores these six. Each is one of the task
+types Runware's Model Router accepts, so a `model: auto` recipe works for them too.
+
+| `taskType` | The recipe sends | The output | What the checks compare |
+|---|---|---|---|
+| `upscale` | `inputs: { image: $input }`, `upscaleFactor` | a larger picture | the picture, at the input's size and at its own |
+| `removeBackground` | `inputs: { image: $input }`, `outputFormat: PNG` | a picture with transparency | its alpha, with a reference outline of the subject |
+| `imageMasking` | `inputs: { image: $input }` | a black and white mask | the mask, with a reference outline |
+| `vectorize` | `inputs: { image: $input }` | an SVG | the SVG rendered at the input's width, and the file itself |
+| `caption` | `inputs: { image: $input }`, `prompt` | text | the text (and, for judges, the input picture) |
+| `textInference` | `messages: [{ role: user, content: $input }]`, `settings` | text | the text (and, for judges, the input text) |
+
+```yaml
+# recipes/bria-rmbg-2.yaml
+id: bria-rmbg-2
+taskType: removeBackground
+model: bria:2@1
+params: { inputs: { image: $input }, outputFormat: PNG }
+price: 0.018
+```
+
+- **Reference outline.** A background remover or a masking model is judged against an outline you
+  trust: `regions: { product: masks/item.png }` on the input, white = the subject. Draw or correct it
+  by hand for the inputs that matter. `auto:<AIR>` makes one with a model, which then agrees with
+  itself: do not use a model under test.
+- **Text inputs.** An input whose file ends in `.txt` or `.md` is a text input: it is not uploaded,
+  and `$input` is its content. Use it for `textInference` benches (one prompt or document per file).
+- **Per-input facts for text checks**, next to `path`: `reference:` (a text the answer should be close
+  to), `terms:` (words that must appear), `banned:` (words that must not). The same keys on a check
+  apply to every input.
+- **Seeds.** Most of these tasks take no seed. Each seed is then one more call of the same request,
+  cached on its own, which shows how much the answer varies: useful for text, wasteful for a tool that
+  always answers the same. Use `seeds: [1]` unless the variation is what you want to see.
+- **Prices.** Text models are priced per token, so the listed price says little about one answer: give
+  `price` (USD per output) from a smoke round. Add `includeUsage: true` to a `textInference` recipe to
+  get token counts (`text_output_tokens`).
+- **Ground truth for upscalers**, next to `path`: `original:` (the full-size picture this input was shrunk
+  from). `upscale_truth_ssim` and `upscale_truth_psnr` compare the result with it.
+- **One field of a JSON answer**: `field: title` on a text check reads that field instead of the whole
+  answer (`{ id: text_words, field: title, max: 8 }`).
+- **Reference outlines from a model**: `auto:<AIR>` uses the background remover you name
+  (`auto:bria:2@1`); plain `auto:` uses BiRefNet General.
+- **No product outline is bought** for cut-outs and masks (they are their own outline), vector files or
+  text. Upscaled pictures get one like any picture.
+
+The checks for each are in `metrics.md` (sections "Upscaled pictures", "Cut-outs and masks", "Vector
+files", "Text").
 
 ## Multi-step recipes
 

@@ -17,8 +17,9 @@ from skimage.metrics import structural_similarity
 
 from concurrent.futures import ThreadPoolExecutor
 
-from . import catalog
+from . import adapters, catalog
 from . import judge as judge_mod
+from . import text as textmod
 from .metric_api import erode  # noqa: F401  (re-exported for report.py and judge.py)
 from . import render as render_mod
 from . import video as video_mod
@@ -62,13 +63,27 @@ def input_region(b, inp, spec):
     raise KeyError(f"Region '{spec}' is not defined for {inp['path']}")
 
 
+def input_rgb(b, inp):
+    """An input as a picture: the image itself, or a text input drawn on a card. Returns (rgb, size)."""
+    src = os.path.join(b["_dir"], inp["path"])
+    if textmod.is_text(src):
+        card = textmod.card(textmod.read(src))
+        return np.asarray(card).astype(np.float64) / 255.0, card.size
+    return load_rgb(src)
+
+
 class Pair:
-    """An input and one output, aligned to the input's size, with cached derived data."""
+    """An input and one output, aligned to the input's size, with cached derived data.
+
+    `out_path` is the picture of the output: the file itself for an image, or what an adapter made of
+    it (a render, a first frame, a card). `out_file` is always the file as delivered."""
 
     def __init__(self, b, inp, out_path, out_mask_path):
         self.src = os.path.join(b["_dir"], inp["path"])
-        self.bench = b
-        self.rgb_in, (self.W, self.H) = load_rgb(self.src)
+        self.bench, self.input = b, inp
+        self.text_in = textmod.read(self.src) if textmod.is_text(self.src) else None
+        self.rgb_in, (self.W, self.H) = input_rgb(b, inp)
+        self.out_file = out_path
         self.rgb_out, self.native = load_rgb(out_path, (self.W, self.H))
         self.lab_in, self.lab_out = rgb2lab(self.rgb_in), rgb2lab(self.rgb_out)
         regions = inp.get("regions") or {}
@@ -76,7 +91,9 @@ class Pair:
         self.masks_in = {k: load_mask(os.path.join(b["_dir"], v), (self.W, self.H))
                          for k, v in regions.items() if isinstance(v, str) and not v.startswith("auto:")}
         self.m_out = load_mask(out_mask_path, (self.W, self.H)) if out_mask_path else None
-        self.mesh = self.video = None
+        self.mesh = self.video = self.svg = self.text = None
+        self.text_meta, self.alpha_file, self.no_picture = {}, None, None
+        self.out_is_outline = False  # a cut-out or a mask: the output is an outline, whatever the region is called
 
     def region(self, spec, side="in"):
         """`product`, `not(product)`, a box region, or None for the whole frame."""
@@ -92,7 +109,7 @@ class Pair:
             return r
         if spec not in self.masks_in:
             raise KeyError(f"Region '{spec}' is not defined for {self.src}")
-        if side == "out" and spec == "product" and self.m_out is not None:
+        if side == "out" and self.m_out is not None and (spec == "product" or self.out_is_outline):
             return self.m_out
         return self.masks_in[spec]
 
@@ -212,7 +229,8 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
         for opt in spec.get("metrics", []):
             row = {"dimension": dim, "mode": row_mode(spec, opt), "id": opt["id"], "label": label(opt),
                    "thresholds": {k: v for k, v in opt.items() if k not in (
-                       "id", "name", "label", "region", "rule", "on", "judges", "questions", "rubric", "scale")}}
+                       "id", "name", "label", "region", "rule", "on", "judges", "questions", "rubric", "scale",
+                       "terms", "banned", "keys", "pattern", "case", "field", "strict", "min_share", "edge_pct")}}
             legacy = re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
             if legacy:  # an older `rule: "... >= 3"`: record it as min / max so calibration can read it
                 row["thresholds"].setdefault("min" if legacy.group(1) == ">=" else "max", float(legacy.group(2)))
@@ -231,6 +249,14 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
                 continue
             fn = m["compute"]
             row.update(metric_fp=m["fp"], metric_source=m["source"])
+            if p.no_picture and m["meta"].get("family") != "vector":
+                rows.append({**row, "status": "not_run", "note": f"the SVG could not be rendered: {p.no_picture}"})
+                continue
+            for_text = "text_output" in m["meta"].get("needs", [])
+            if for_text != (p.text is not None):
+                rows.append({**row, "status": "not_run", "note": "a check for text outputs: this output is not text"
+                             if for_text else "a check for pictures: this output is text"})
+                continue
             if m["meta"].get("copy_sensitive") and opt.get("region") in copied:
                 rows.append({**row, "status": "not_run",
                              "note": f"copied from the original by this recipe: a pass would be by construction"})
@@ -250,6 +276,8 @@ def controls(b, reg):
     out = []
     for inp in b["inputs"]:
         src = os.path.join(b["_dir"], inp["path"])
+        if textmod.is_text(src):
+            continue  # no unchanged copy of a text input can stand in for an output
         prod = (inp.get("regions") or {}).get("product")
         mask = os.path.join(b["_dir"], prod) if isinstance(prod, str) and not prod.startswith("auto:") else None
         p = Pair(b, inp, src, mask)
@@ -272,6 +300,56 @@ def controls(b, reg):
                             "kind": m["meta"]["kind"], "value": vals.get("value"), "passed": passed,
                             "expected_pass": expected, "ok": passed == expected})
     return out
+
+
+def adapt(b, inp, f, what, out_dir, op, plain_mask):
+    """A Pair for an output that is a cut-out, a mask, a vector file or text (see adapters.py), and what
+    the report needs to show it. A plain picture comes back as it is, with nothing extra."""
+    if what == "image":
+        return Pair(b, inp, f, plain_mask()), None
+    os.makedirs(os.path.join(out_dir, "renders"), exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "masks"), exist_ok=True)
+    stem_ = os.path.basename(f).rsplit(".", 1)[0]
+    view, cut = f"renders/{stem_}__{what}.png", f"masks/{stem_}_cut.png"
+    vpath, cpath, facts_path = os.path.join(out_dir, view), os.path.join(out_dir, cut), os.path.join(
+        out_dir, "renders", f"{stem_}__{what}.json")
+    cached = os.path.exists(facts_path) and os.path.exists(vpath)
+    facts = json.load(open(facts_path, encoding="utf8")) if cached else None
+    if what == "text":
+        text = textmod.read(f)
+        if not cached:
+            size = input_rgb(b, inp)[1]
+            textmod.card(text, size).save(vpath)
+            facts = {"words": len(textmod.words(text)), "chars": len(text)}
+        p = Pair(b, inp, vpath, None)
+        p.text, p.text_meta = text, {k: op[k] for k in ("finishReason", "usage") if op.get(k) is not None}
+        entry = {"view": view, "text": text, "native": f"{facts['words']} words"}
+    elif what == "vector":
+        if not cached:
+            facts = adapters.svg(f, vpath, input_rgb(b, inp)[1][0])
+            if facts.get("render_error"):  # the file is kept and its facts are read; there is no picture to check
+                textmod.card(f"This SVG could not be rendered:\n{facts['render_error']}", input_rgb(b, inp)[1]).save(vpath)
+        p = Pair(b, inp, vpath, None)
+        p.svg, p.no_picture = facts, facts.get("render_error")
+        entry = {"view": view, "view_info": facts,
+                 "native": f"SVG · {facts['shapes']} shapes · {facts['file_kb']:.0f} KB"
+                           + (f" · {facts['images']} embedded bitmap(s)" if facts["images"] else "")
+                           + (" · not rendered" if facts.get("render_error") else "")}
+    else:
+        if not (cached and os.path.exists(cpath)):
+            facts = (adapters.cutout(f, vpath, cpath) if what == "cutout"
+                     else adapters.mask(f, input_rgb(b, inp)[0], vpath, cpath))
+        p = Pair(b, inp, vpath, cpath)
+        p.out_is_outline = True
+        if what == "cutout":
+            p.alpha_file = f
+        entry = {"view": view, "view_mask": cut, "view_info": facts,
+                 "native": f"{facts['width']}x{facts['height']}"
+                           + ("" if what == "mask" or facts.get("has_alpha") else " · no transparency")}
+    p.out_file = f
+    if not cached:
+        json.dump(facts, open(facts_path, "w", encoding="utf8"))
+    return p, {"entry": entry}
 
 
 def find_mask(out_dir, fname, recipe):
@@ -358,7 +436,9 @@ def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
             p = Pair(b, inputs[inp], first, find_mask(out_dir, fname, recipe))
             p.video = {**clip, "frames": video_mod.frames(f, bars=clip["bars"])}
         else:
-            p = Pair(b, inputs[inp], f, find_mask(out_dir, fname, recipe))
+            op = ops.get(fname, {})
+            what = adapters.kind(f, op.get("task_type") or recipes_by_id.get(recipe, {}).get("taskType"))
+            p, view = adapt(b, inputs[inp], f, what, out_dir, op, lambda: find_mask(out_dir, fname, recipe))
         jobs = [] if panel else None
         metrics = score_pair(b, p, jobs, recipes_by_id.get(recipe), reg)
         fails = pixel_fails(metrics)
@@ -381,7 +461,9 @@ def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
                  "latency_s": r.get("latency_s"), "metrics": metrics}
         if r.get("picked_model"):
             entry["picked_model"] = r["picked_model"]
-        if view:
+        if view and "entry" in view:
+            entry.update(view["entry"])  # a cut-out, mask, vector file or text: see adapt()
+        elif view:
             stem_ = fname.rsplit(".", 1)[0]
             entry.update(view=f"renders/{stem_}__front.png", view_mask=f"renders/{stem_}__front_cut.png",
                          turntable=f"renders/{stem_}__turntable.jpg", view_info=view,
