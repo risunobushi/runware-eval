@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'share matched',
     'direction': 'higher',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "Share of the input's SIFT keypoints matched in the output at 512 px. Tracks light changes as much as product changes: info only.",
 }
 

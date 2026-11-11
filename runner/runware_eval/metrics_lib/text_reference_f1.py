@@ -9,6 +9,7 @@ META = {
     'needs': ['text_output', 'reference'],
     'unit': 'F1',
     'direction': 'higher',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "Word overlap between the text and the input's `reference:` text (F1 of shared words, 0 to 1). It rewards the same words, not the same meaning: a good paraphrase scores low, so pair it with a judge.",
 }
 

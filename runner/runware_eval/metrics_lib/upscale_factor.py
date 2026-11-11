@@ -9,6 +9,7 @@ META = {
     'needs': ['reference'],
     'unit': '× input',
     'direction': 'higher',
+    'tolerance': 0.05,  # smallest difference that counts (margin of a limit set from results)
     'description': 'How much larger the output is than the input: output width / input width (2.0 = twice as wide). Also reports the delivered size.',
 }
 

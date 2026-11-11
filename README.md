@@ -88,6 +88,14 @@ is sent unless a recipe asks for one, so every draw is a new generation on the m
 whether or not the model has a seed field. A check passes when it passes on most draws. Draws that come
 back as the very same file are called out in the report.
 
+**Limits.** Nobody types thresholds. A yes/no requirement is a question to the judges and passes when most
+say yes. A numeric check gets its limit from the bench's first full run: the median of the recipes' results,
+moved towards "worse" by the larger of the spread between draws and the metric's smallest difference that
+counts. There is no "nothing changed" baseline to hold a model to (encoding and decoding a picture already
+changes it, and a closed model's round trip cannot be measured), so the typical result of real models is
+the baseline. The limits are frozen in `limits.yaml` with a line on where each came from; the report lists
+them, and the agent changes one when asked.
+
 **Parameter check.** Runware runs and bills a request that carries a field it does not know, at the model's
 default. So before `estimate` and `run`, one request per recipe is validated against the model's published
 schema. A field the model does not have (`widht`, with "did you mean `width`?"), a value outside the allowed

@@ -9,6 +9,7 @@ META = {
     'needs': ['video'],
     'unit': 'L* residual',
     'direction': 'lower',
+    'tolerance': 1.0,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Do surfaces hold still as they move? What is left when each frame is moved onto the next along the measured motion (lower = steadier).',
 }
 

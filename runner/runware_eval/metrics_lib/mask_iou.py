@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'IoU',
     'direction': 'higher',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "Does the output's outline overlap the input's? Intersection over union of the region masks.",
 }
 

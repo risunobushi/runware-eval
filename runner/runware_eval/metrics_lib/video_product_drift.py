@@ -9,6 +9,7 @@ META = {
     'needs': ['video', 'reference', 'region'],
     'unit': 'histogram distance',
     'direction': 'lower',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "Is it still the same product later in the video? Largest change in the colour make-up of the product, frame outline against the input's (0 = same colours, 1 = nothing in common).",
 }
 

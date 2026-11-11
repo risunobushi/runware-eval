@@ -188,7 +188,7 @@ def coverage(b):
         elif status == "dropped":
             warn.append(f"left out by choice ({why}): {need}")
         elif status == "measured":
-            warn.append(f"measured, but no limit (cannot fail a recipe): {need}")
+            warn.append(f"measured, no limit yet (numeric checks get theirs from the first full run): {need}")
     if limits and not any(limits.values()):
         warn.append("no check has a limit: recipes can only be placed, none can fail.")
     used = {c["label"] for r in rows for c in r["checks"]}
@@ -227,6 +227,11 @@ def plan(b, reg):
                     "vlm_same_object": "The vision judges are asked whether the output shows the same object as the input; passes when most say yes.",
                     "vlm_rubric": "The vision judges score the output on a scale against a written rubric."}[opt["id"]]}}
             limit = ", ".join(f"{k} {opt[k]}" for k in LIMIT_KEYS if k in opt)
+            if opt.get("limitFrom"):
+                limit += " (set from the first full run)"
+            elif not limit and opt.get("limit") != "none" and opt.get("id") not in YES_NO and (
+                    opt.get("id") == "vlm_rubric" or (m.get("meta") or {}).get("direction")):
+                limit = "worse than the typical recipe (set from the first full run)"
             if not limit and opt.get("id") in YES_NO:
                 limit = "yes on every question"
             rows.append({"label": label(opt), "id": metric_id(opt), "dimension": dim,
@@ -276,7 +281,8 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
             row = {"dimension": dim, "mode": row_mode(spec, opt), "id": opt["id"], "label": label(opt),
                    "thresholds": {k: v for k, v in opt.items() if k not in (
                        "id", "name", "label", "region", "rule", "on", "judges", "questions", "rubric", "scale",
-                       "terms", "banned", "keys", "pattern", "case", "field", "strict", "min_share", "edge_pct")}}
+                       "terms", "banned", "keys", "pattern", "case", "field", "strict", "min_share", "edge_pct",
+                       "limit", "limitFrom")}}
             legacy = re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
             if legacy:  # an older `rule: "... >= 3"`: record it as min / max so calibration can read it
                 row["thresholds"].setdefault("min" if legacy.group(1) == ">=" else "max", float(legacy.group(2)))

@@ -9,6 +9,7 @@ META = {
     'needs': ['video'],
     'unit': 'histogram distance',
     'direction': 'lower',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "Does a video stay in one scene? Largest change in the picture's colour make-up within half a second (0 = same scene, 1 = nothing in common).",
 }
 

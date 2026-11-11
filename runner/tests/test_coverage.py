@@ -50,7 +50,7 @@ check("the plan lists every check with its requirement", [r["label"] for r in pl
       and by["Outline"]["needs"] == ["Same outline"])
 check("the plan says where each metric comes from and what fails it",
       by["Outline"]["origin"] == "library" and by["Outline"]["limit"] == "min 0.9"
-      and by["Structure"]["limit"].startswith("none") and by["Real photo (judges)"]["limit"] == "yes on every question"
+      and by["Structure"]["limit"].startswith("worse than the typical recipe") and by["Real photo (judges)"]["limit"] == "yes on every question"
       and by["Real photo (judges)"]["questions"] == ["Does image 2 look like a real photograph?"])
 
 print(f"\n{len(FAILED)} failed" if FAILED else "\nall passed")

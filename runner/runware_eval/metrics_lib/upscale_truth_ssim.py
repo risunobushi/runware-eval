@@ -9,6 +9,7 @@ META = {
     'needs': ['reference'],
     'unit': 'SSIM',
     'direction': 'higher',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "How close the upscaled picture is to the full-size original the input was shrunk from (the input's `original:` file), at the original's size: SSIM of luminance, 1 = identical. Also reports what a plain resize of the input scores (`plain_resize`) and the difference: below 0, the upscaler did worse than no upscaler. The only upscale check that tells recovered detail from invented detail.",
 }
 

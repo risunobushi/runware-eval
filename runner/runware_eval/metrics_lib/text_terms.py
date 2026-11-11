@@ -9,6 +9,7 @@ META = {
     'needs': ['text_output'],
     'unit': 'share found',
     'direction': 'higher',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "Share of the required terms that appear in the text (case-insensitive). Terms come from `terms:` on the check, or per input from the input's own `terms:`.",
 }
 

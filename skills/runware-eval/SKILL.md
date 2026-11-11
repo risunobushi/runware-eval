@@ -245,14 +245,26 @@ Then load `references/metrics.md` for how to choose among existing metrics, and 
    check; a metric without one is only measured. The report sorts recipes by failed checks, then by
    average place across the dimensions (place 1 = best on a measurement, averaged inside each
    dimension, then across dimensions), then by cost. So:
-   - Give a limit to every metric that has a defensible one: the default in `references/metrics.md`,
-     or what the brief implies ("the logo must stay readable"). Aim for at least one limit per chosen
-     dimension, and one on the metric that says whether the task was done at all (e.g. the camera did
-     orbit): without it, a recipe that does nothing can place well on every "nothing changed" metric.
-   - Leave a metric without a limit only when no honest limit exists yet (a judge rubric or aesthetics
-     score before calibration, a new bench-specific metric before the smoke round). After the smoke
-     round, propose limits from what was measured. Yes/no judge checks are never in this group: they
-     pass or fail from the first run.
+   - **Do not invent limits for numeric checks, and do not ask the user for them.** Write the check
+     without a limit. The runner sets it from the first full run and freezes it in `limits.yaml` next
+     to `bench.yaml`: the median of the recipes' results, moved towards "worse" by a margin (the larger
+     of the typical spread between draws and the metric's `tolerance`, its smallest difference that
+     counts). An output fails when it is worse than the typical recipe by more than a re-roll explains.
+     The reason: there is no "nothing changed" baseline. A model changes pixels just by encoding and
+     decoding the picture, and nobody can measure that round trip for a closed model, so what real
+     models return is the only baseline. If every recipe is poor, the typical one still passes: that
+     is the ceiling of what models can do on this brief, not a fault of the bench.
+   - Write a limit into `bench.yaml` yourself only when the brief states one ("at most 2 seconds",
+     "under 0.10 USD", "exactly the input's size") or the user asks for one. A limit in `bench.yaml`
+     always wins over `limits.yaml`. `limit: none` on a check keeps it measured only.
+   - After the first full run, tell the user which limits were set and how (the run prints them, the
+     report lists them under caveats, `limits.yaml` holds the `from` line of each). If the user wants
+     one changed, edit its value in `limits.yaml`, add to its `from` line that the user set it and
+     why, and run `score` again. Limits never move by themselves after that, so recipes added later
+     are held to the same line.
+   - Yes/no judge checks need none of this: they pass or fail from the first run.
+   - The smoke round sets no limits (one draw, one input): look at its outputs for broken recipes,
+     not at pass and fail.
    - Say it to the user in plain words: "these are the limits an output must meet; everything else is
      measured and used to place the recipes". A failed check counts against a recipe in the report; it
      does not remove the recipe from the run or from a later step.
@@ -273,7 +285,10 @@ all, drop some, or ask for others. Then:
 - Show the table again after any change, and get a yes before continuing.
 
 **To write a metric**: a file in the bench's `metrics/` folder with a `META` dict and a
-`compute(pair, opt)` function, following the contract in the runner's `metric_api.py`. Set `kind`
+`compute(pair, opt)` function, following the contract in the runner's `metric_api.py`. Set
+`direction` (`lower`, `higher` or `closer_to_zero`: without it the check cannot get a limit or place
+recipes) and `tolerance`, the smallest difference in this metric's unit that anyone would care about
+(2 px, 1 L*, 0.02 of an overlap): it is the least margin a limit set from results will have. Set `kind`
 honestly: `preserve` (an unchanged output must pass), `change` (the task asks for change, so an
 unchanged output must fail) or `info`. Then:
 

@@ -9,6 +9,7 @@ META = {
     'needs': ['video', 'reference', 'region'],
     'unit': 'IoU',
     'direction': 'higher',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Does the product keep its outline through a video? Lowest overlap (IoU) between its outline in the sample frames and in the input.',
 }
 

@@ -9,6 +9,7 @@ META = {
     'needs': ['video'],
     'unit': 'ΔE2000',
     'direction': 'lower',
+    'tolerance': 1.0,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Colour drift over a video: how far the average colour moves from the first frame (CIEDE2000; option ignore_lightness).',
 }
 

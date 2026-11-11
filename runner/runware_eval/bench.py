@@ -39,6 +39,8 @@ def load(path, resolve_recipes=True):
     if resolve_recipes:
         from .recipes import resolve_bench
         resolve_bench(b)
+    from . import limits
+    limits.attach(b)  # limits frozen from the first full run (limits.yaml); bench.yaml's own win
     return b
 
 

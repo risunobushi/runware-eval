@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'share of the reference',
     'direction': 'lower',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': "How much the output selects or keeps outside the reference region, as a share of the reference's area (0 = nothing extra). For a cut-out: background left in.",
 }
 

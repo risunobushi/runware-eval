@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'ΔE2000',
     'direction': 'lower',
+    'tolerance': 1.0,  # smallest difference that counts (margin of a limit set from results)
     'copy_sensitive': True,
     'description': 'Colour change inside a region (CIEDE2000; options: ignore_lightness, l_range, erode_pct). Reports mean and p95.',
 }

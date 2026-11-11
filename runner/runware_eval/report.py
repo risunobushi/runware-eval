@@ -696,7 +696,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         rid = next(r["recipe"] for r in rows_ if r.get("hash") == h)
         x = old_model.setdefault((st["model"], st["since"], "; ".join(st["what"])), {})
         x[rid] = x.get(rid, 0) + 1
-    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial or own_judge or same_draws or old_model:
+    if notes.get("findings") or notes.get("caveats") or missing or errors or bad_ctl or partial or own_judge or same_draws or old_model or any(
+            o.get("limitFrom") for sp in (b.get("evaluate") or {}).values() for o in sp.get("metrics", [])):
         rows = [note(*split_note(n)) for n in notes.get("findings", [])]
         warns = [note(*split_note(n), warn=True) for n in notes.get("caveats", [])]
         for c in bad_ctl:
@@ -718,6 +719,15 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             warns.append(note("<strong>Draws that are the same output</strong>",
                               f"{e(', '.join(same_draws))}. Every draw came back as the same file, so they count as "
                               "one result: the model does not vary for this request, or the recipe fixes a seed.", True))
+        from . import limits as limits_mod
+        auto = limits_mod.listed(b)
+        if auto:
+            warns.append(note(f"<strong>{len(auto)} limit(s) were set from this bench's first full run</strong>",
+                              "Each is the typical recipe's result, moved by a margin, and stays fixed on later runs. "
+                              "A recipe fails when it is worse than typical by more than a re-roll explains; if every "
+                              "recipe is poor, the typical one still passes. <ul>"
+                              + "".join(f"<li><strong>{e(n)}</strong>: {e(lim)}. {e(why[0].upper() + why[1:])}.</li>" for n, lim, why in auto)
+                              + "</ul>", True))
         for (air, since, what), per in old_model.items():
             warns.append(note(f"<strong>{e(air)} changed after these outputs were made</strong>",
                               f"{e(', '.join(f'{rid} ({n})' for rid, n in sorted(per.items())))}: generated before {e(since)}, "

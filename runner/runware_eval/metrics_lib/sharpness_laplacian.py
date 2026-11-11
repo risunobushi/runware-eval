@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': '× input',
     'direction': 'higher',
+    'tolerance': 0.05,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Laplacian variance inside a region, relative to the input (1.0 = as sharp).',
 }
 

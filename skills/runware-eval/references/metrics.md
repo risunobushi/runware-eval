@@ -13,6 +13,11 @@ different `family`.
   (vision-capable model called through Runware `textInference`)
 - `status`: `ready` (implemented in the runner) or `planned` (selectable, flagged as unavailable)
 
+> **Limits.** The "default" column below is a reference for reading a value, not something to write into
+> `bench.yaml`. Numeric checks get their limit from the bench's first full run (typical recipe plus a
+> margin, frozen in `limits.yaml`; see `bench-format.md`). Write a limit by hand only when the brief
+> states one.
+
 ## Deviation — did it change what it should not?
 
 | id | family | trust | needs | runs_on | unit / direction | default limit | status |

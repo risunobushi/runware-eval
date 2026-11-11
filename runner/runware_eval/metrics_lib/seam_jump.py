@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'L* step',
     'direction': 'lower',
+    'tolerance': 1.0,  # smallest difference that counts (margin of a limit set from results)
     'description': "Visible compositing: brightness step across a region's border, minus the step already in the input.",
 }
 

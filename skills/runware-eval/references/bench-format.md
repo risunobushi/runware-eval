@@ -104,6 +104,9 @@ A requirement whose checks have no limit is printed as a warning (`!`) and does 
 passes when, on every question, more judges say yes than no. A `min` next to one (share of yes answers,
 as older benches have) is used instead when present.
 
+**Numeric checks** get their limit from the first full run, not from bench.yaml (see "Limits set from
+the first full run" below).
+
 **Parameters.**
 
 `estimate` and `run` validate one request per recipe (and its `then` step) against the model's published
@@ -124,6 +127,42 @@ prices, every request field with its type, allowed values, range and default). A
 prints what changed; results carry `model_fp`, the record they were generated under, so the report can mark
 the ones from before a change. `run --regenerate-changed` makes those again. Results from before this
 record existed carry no stamp and are not marked.
+
+## Limits set from the first full run
+
+A numeric check written without a limit gets one when the first full run is scored:
+
+```
+limit  = median of the recipes' medians, moved towards "worse" by the margin
+margin = the larger of  the typical spread between draws of one recipe
+                        the metric's `tolerance` (smallest difference that counts, in its META)
+```
+
+Every recipe counts once. The median is not pulled by one recipe that did nothing or broke, so no
+separate step decides which outputs "did the task". The limits are written once to `limits.yaml` next to
+`bench.yaml` and never moved again:
+
+```yaml
+Bag hue:
+  max: 6.67
+  from: 'median of 4 recipes (5.46) plus 1.22: the spread between draws (1.22), larger than the smallest difference that counts (1)'
+  recipes: 4
+  outputs: 12
+  set: '2026-11-11'
+  run: full
+```
+
+| To | Do |
+|---|---|
+| change a limit | edit `max` / `min` / `abs_max` in `limits.yaml` and say why in `from`; run `score` |
+| state a limit the brief gives | write it next to the check in `bench.yaml` (`max: 2.0`); it wins over `limits.yaml` |
+| keep a check measured only | `limit: none` next to the check |
+| have a limit set again from a run's results | delete its entry in `limits.yaml`; run `score --round full` |
+
+Not set: on a smoke round, on a run narrowed with `--inputs` or `--recipes`, for a check with fewer than
+two recipes, and for a metric whose META has no `direction`. With one draw per recipe the margin is the
+metric's `tolerance` alone. A limit set this way says "not clearly worse than the typical recipe in the
+first run": if every recipe is poor, the typical one still passes.
 
 ## Masks as model inputs
 

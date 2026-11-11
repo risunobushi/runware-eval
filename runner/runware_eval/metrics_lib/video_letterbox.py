@@ -9,6 +9,7 @@ META = {
     'needs': ['video'],
     'unit': 'share of frame',
     'direction': 'lower',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Black bars in a video: share of the frame taken by bars that stay black for the whole clip (0 = none).',
 }
 

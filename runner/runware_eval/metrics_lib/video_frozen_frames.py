@@ -9,6 +9,7 @@ META = {
     'needs': ['video'],
     'unit': 'share of clip',
     'direction': 'lower',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Share of a video in which the picture does not change at all (0 = always changing, 1 = a still image).',
 }
 

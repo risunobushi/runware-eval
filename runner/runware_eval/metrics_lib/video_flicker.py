@@ -9,6 +9,7 @@ META = {
     'needs': ['video'],
     'unit': 'L*',
     'direction': 'lower',
+    'tolerance': 1.0,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Brightness flicker in a video: frame-to-frame jumps in lightness that a smooth change would not have.',
 }
 

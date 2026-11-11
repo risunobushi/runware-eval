@@ -141,6 +141,18 @@ def cmd_score(a, b=None, out=None, results=None):
     data = score.score_all(b, out, results if results is not None else run.read_results(out),
                            judges=not getattr(a, "no_judges", False),
                            maxSpend=bench.maxSpend(b))
+    if a.round == "full" and not a.inputs and not a.recipes:
+        # numeric checks with no limit get one from this first full run, then it is frozen (limits.py)
+        from . import catalog, limits
+        new = limits.freeze(b, limits.propose(b, data["scored"], catalog.load(b)), a.round)
+        if new:
+            print(f"Limits set from this run for {len(new)} check(s), written to {limits.path(b)}:")
+            for name, v in new.items():
+                key = next(k for k in ("max", "min", "abs_max") if k in v)
+                print(f"  {name}: {key} {v[key]}  ({v['from']})")
+            limits.attach(b)
+            data = score.score_all(b, out, results if results is not None else run.read_results(out),
+                                   judges=not getattr(a, "no_judges", False), maxSpend=bench.maxSpend(b))
     print(f"Scored {len(data['scored'])} outputs → {os.path.join(out, 'scores.json')}")
     cmd_report(a, b, out)
 
@@ -182,7 +194,8 @@ def cmd_metrics(a):
         rows = score.plan(b, reg)
         print("| # | Check | Answers | Metric | Origin | Trust | Fails when |\n|---|---|---|---|---|---|---|")
         for i, r in enumerate(rows, 1):
-            limit = "never: " + r["limit"] if r["limit"].startswith("none") else "outside " + r["limit"] if r["limit"][0] != "y" else "not " + r["limit"]
+            limit = ("never: " + r["limit"] if r["limit"].startswith("none") else r["limit"] if r["limit"].startswith("worse")
+                     else "outside " + r["limit"] if r["limit"][0] != "y" else "not " + r["limit"])
             print(f"| {i} | {r['label']} | {'; '.join(r['needs']) or 'no requirement'} | `{r['id']}` | {r['origin']} | {r['trust']} | {limit} |")
         print()
         for i, r in enumerate(rows, 1):

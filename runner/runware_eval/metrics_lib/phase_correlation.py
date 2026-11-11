@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'px',
     'direction': 'lower',
+    'tolerance': 2,  # smallest difference that counts (margin of a limit set from results)
     'description': 'How far did the product move? Phase correlation between input and output product masks.',
 }
 

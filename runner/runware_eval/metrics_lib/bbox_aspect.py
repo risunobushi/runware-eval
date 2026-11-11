@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'ratio error',
     'direction': 'lower',
+    'tolerance': 0.01,  # smallest difference that counts (margin of a limit set from results)
     'description': "Proportions: relative difference of the region's bounding-box width/height ratios.",
 }
 

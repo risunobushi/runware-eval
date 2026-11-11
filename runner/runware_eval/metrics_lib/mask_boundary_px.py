@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'px',
     'direction': 'lower',
+    'tolerance': 2,  # smallest difference that counts (margin of a limit set from results)
     'description': "How far the output's outline is from the reference outline: mean distance in pixels at the input's size, both ways (also p95). Catches a ragged or shifted edge that overlap (mask_iou) hides on a large shape.",
 }
 

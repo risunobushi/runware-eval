@@ -9,6 +9,7 @@ META = {
     'needs': ['video'],
     'unit': '× first frame',
     'direction': 'higher',
+    'tolerance': 0.05,  # smallest difference that counts (margin of a limit set from results)
     'description': 'Does a video stay sharp? Sharpness of its last quarter relative to its first frame (1.0 = as sharp).',
 }
 

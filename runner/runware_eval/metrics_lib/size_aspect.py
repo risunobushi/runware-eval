@@ -9,6 +9,7 @@ META = {
     'needs': ['reference'],
     'unit': 'aspect ratio error',
     'direction': 'lower',
+    'tolerance': 0.01,  # smallest difference that counts (margin of a limit set from results)
     'description': "Did the output keep the input's proportions? Relative error of width/height; also reports the native size.",
 }
 

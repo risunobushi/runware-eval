@@ -9,6 +9,7 @@ META = {
     'needs': ['reference'],
     'unit': '× plain resize',
     'direction': 'higher',
+    'tolerance': 0.05,  # smallest difference that counts (margin of a limit set from results)
     'description': "Fine detail at the output's own size, relative to the input enlarged by plain resampling (1.0 = no more detail than a resize). More is not always better: detail the input never had is invented, so read it next to a fidelity check.",
 }
 

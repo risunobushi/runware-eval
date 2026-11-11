@@ -9,6 +9,7 @@ META = {
     'needs': ['reference'],
     'unit': 'dB',
     'direction': 'higher',
+    'tolerance': 0.5,  # smallest difference that counts (margin of a limit set from results)
     'description': "Pixel error against the full-size original the input was shrunk from (the input's `original:` file), as PSNR in dB: higher is closer. Strict about every pixel, so a sharper but slightly different texture scores below a blurry one: read it next to upscale_truth_ssim and upscale_detail_gain.",
 }
 

@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'SSIM',
     'direction': 'higher',
+    'tolerance': 0.02,  # smallest difference that counts (margin of a limit set from results)
     'copy_sensitive': True,
     'description': 'Structural similarity of luminance inside a region (option on: luminance_normalised).',
 }

@@ -9,6 +9,7 @@ META = {
     'needs': ['reference', 'region'],
     'unit': 'NCC',
     'direction': 'higher',
+    'tolerance': 0.05,  # smallest difference that counts (margin of a limit set from results)
     'copy_sensitive': True,
     'description': 'Fine detail (lettering, stitching) kept? Best correlation of high-pass luminance over small offsets; survives lighting changes.',
 }
