@@ -159,6 +159,13 @@ Bag hue:
 | keep a check measured only | `limit: none` next to the check |
 | have a limit set again from a run's results | delete its entry in `limits.yaml`; run `score --round full` |
 
+**The limits hold for the inputs they were set on.** They are one number per check, taken across all
+inputs, and many measurements depend on the input (how much light can move to the left half of a tall thin
+vase is not what it is for a kettle). Limits frozen on five products rejected 94 of 100 good outputs on
+fifteen other products; on a bench of very different recipes they came out too loose to fail anything. For
+new inputs, start a new bench folder (its own `limits.yaml`) and read the measurements, not only the pass
+counts. Setting limits per input is planned.
+
 Not set: on a smoke round, on a run narrowed with `--inputs` or `--recipes`, for a check with fewer than
 two recipes, and for a metric whose META has no `direction`. With one draw per recipe the margin is the
 metric's `tolerance` alone. A limit set this way says "not clearly worse than the typical recipe in the
@@ -261,6 +268,41 @@ price: 0.018
 
 The checks for each are in `metrics.md` (sections "Upscaled pictures", "Cut-outs and masks", "Vector
 files", "Text").
+
+## Your own model on Runware Serverless
+
+A recipe can call an endpoint of a Runware Serverless app, so a model you trained or deployed yourself is
+benchmarked next to the catalogue's models, with the same checks.
+
+```yaml
+id: klein4b-relight-lora
+taskType: serverlessEndpoint
+model: serverless:my-app            # a label for the report; nothing is looked up
+serverless:
+  app: my-app                       # the app id (`runware serverless apps list`)
+  endpoint: sample                  # the endpoint path (`runware serverless apps endpoints my-app`)
+  imageKey: image                   # field of the handler's answer with the picture as base64 (default: image)
+  secondsKey: seconds               # field with the GPU seconds the handler measured (default: seconds)
+  gpuPricePerSecond: 0.00044444     # USD, from `runware serverless gpus`
+params:                             # the endpoint's payload, as the handler's parameters
+  image: $input.base64              # the input file itself, base64 (an app has no use for Runware media URLs)
+  prompt: "..."
+  seed: $seed
+price: 0.0015                       # USD per output, for the estimate
+```
+
+- **Cost** is the handler's GPU seconds times the GPU's rate: what one output used. Serverless bills GPU
+  time per worker, so a cold start and the idle time before the worker scales down are billed too and are
+  not in that figure. Say so in the recipe's `notes`.
+- **Seeds:** an endpoint usually needs a seed, so `seed: $seed` (the draw's number) is the normal case
+  here. The draws differ from each other and repeat on a re-run.
+- **Not checked:** an app has no published schema, so `estimate` lists the recipe under "Parameters not
+  checked". A wrong field is refused by the app (422), not run silently.
+- The task's id is the Serverless task id, so a retry cannot run a call twice. A worker that scaled to
+  zero takes minutes to come back; the runner waits (up to 30 minutes per call).
+
+A worked example (an app that trains a LoRA in resumable slices and serves it, its client, and the
+recipe) is in the repo's `examples/serverless-training/`.
 
 ## Multi-step recipes
 

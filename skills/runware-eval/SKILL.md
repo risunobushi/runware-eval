@@ -262,6 +262,10 @@ Then load `references/metrics.md` for how to choose among existing metrics, and 
      one changed, edit its value in `limits.yaml`, add to its `from` line that the user set it and
      why, and run `score` again. Limits never move by themselves after that, so recipes added later
      are held to the same line.
+   - The frozen limits hold for the inputs they were set on. When the user brings new inputs (a held-out
+     set, another product line), make a new bench folder for them, do not reuse `limits.yaml`, and report
+     the measurements next to the pass counts (see "Limits set from the first full run" in
+     `references/bench-format.md`).
    - Yes/no judge checks need none of this: they pass or fail from the first run.
    - The smoke round sets no limits (one draw, one input): look at its outputs for broken recipes,
      not at pass and fail.
@@ -432,6 +436,11 @@ clip (about 0.003 USD per clip), which the product checks (`video_outline_hold`,
 `video_product_drift`) read; judges get the first, middle and last frame, so write their questions
 about "the video". Every brief that says the product must stay the same needs at least one of the
 product checks: the frame-wide video checks do not look at the product. Upscalers, background removers, masking models,
+A model the user trained or deployed on Runware Serverless is benched like any other: a recipe with
+`taskType: serverlessEndpoint` calls the app's endpoint (see "Your own model on Runware Serverless" in
+`references/bench-format.md`), so "is my fine-tune better than what I started from?" is the same bench
+with one more recipe. Keep the inputs it was trained on apart from the inputs it is tested on, and say in
+the report which is which. Upscalers, background removers, masking models,
 vectorizers, captioners and text models are benched the same way: set the recipe's `taskType`
 (`upscale`, `removeBackground`, `imageMasking`, `vectorize`, `caption`, `textInference`) and pick the
 checks from the matching section of `references/metrics.md`; what each recipe sends is in "Task types"

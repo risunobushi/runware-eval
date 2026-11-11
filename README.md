@@ -110,6 +110,12 @@ $0.01926`, `field added: ...`). Cached results from before a change are kept and
 `run --regenerate-changed` makes them again. A model whose weights change while its schema, status and
 price stay the same is not seen.
 
+**Your own model.** A recipe can call an endpoint of a Runware Serverless app (`taskType: serverlessEndpoint`),
+so a model you trained or deployed is benchmarked next to the catalogue's, with the same checks and its cost
+per output worked out from GPU seconds. `examples/serverless-training/` has the whole loop that was run with
+it: the bench picks a teacher, its outputs become training pairs, a LoRA is trained on Serverless in
+resumable slices, and the trained model goes back into the bench.
+
 **Spend.** `budget.maxSpend` (USD for one full run) is required. A run stops before it starts if the estimate passes the cap,
 and holds the cap while running: each task starts only if what is spent, what is in flight and its
 own estimate still fit, and a recipe that costs more than estimated is reserved at its real cost from
