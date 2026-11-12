@@ -24,7 +24,6 @@ from PIL import Image
 
 from . import text as textmod
 
-DRAW_TYPES = ("upscale", "removeBackground", "imageMasking", "vectorize", "caption", "textInference")
 SHAPES = ("path", "rect", "circle", "ellipse", "polygon", "polyline", "line")
 ARITY = {"m": 2, "l": 2, "h": 1, "v": 1, "c": 6, "s": 4, "q": 4, "t": 2, "a": 7, "z": 0}
 

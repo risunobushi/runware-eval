@@ -30,7 +30,7 @@ HEAD = ("# Limits set by runware-eval from this bench's first full run, then fro
         "# A limit written in bench.yaml wins over one here. Delete an entry to have it set again on the next\n"
         "# scoring of the full run; edit `max` / `min` / `abs_max` to change it by hand.\n")
 RUBRIC_TOLERANCE = 0.5  # judge rubric scores (1 to 5): half a point
-KEY = {"lower": "max", "higher": "min", "closer_to_zero": "abs_max"}
+KEY = {"lower": "max", "higher": "min", "closer_to_zero": "abs_max"}  # the limit a direction gets
 
 
 def path(b):
@@ -45,26 +45,25 @@ def read(b):
 
 
 def _checks(b):
-    from .score import label
-    for spec in (b.get("evaluate") or {}).values():
-        for opt in spec.get("metrics", []):
-            yield label(opt), opt, spec
+    from .score import all_checks, label
+    for _, opt in all_checks(b):
+        yield label(opt), opt
 
 
-def _open(opt, spec):
+def _open(opt):
     """A check that may get a limit from the results: none in bench.yaml, and not opted out."""
     from .score import row_mode
-    return opt.get("limit") != "none" and "limitFrom" not in opt and row_mode(spec, opt) != "gate"
+    return opt.get("limit") != "none" and "limitFrom" not in opt and row_mode(opt) != "gate"
 
 
 def attach(b):
     """Put the frozen limits on the bench's checks (bench.yaml's own limits win). Returns how many."""
     saved, n = read(b), 0
-    for name, opt, spec in _checks(b):
+    for name, opt in _checks(b):
         entry = saved.get(name)
-        if not entry or not _open(opt, spec):
+        if not entry or not _open(opt):
             continue
-        key = next((k for k in ("max", "min", "abs_max") if k in entry), None)
+        key = next((k for k in KEY.values() if k in entry), None)
         if key:
             opt[key] = entry[key]
             opt["limitFrom"] = entry.get("from", "set from the first full run")
@@ -73,10 +72,9 @@ def attach(b):
 
 
 def direction(opt, reg):
-    from .score import metric_id
     if opt.get("id") == "vlm_rubric":
         return "higher", RUBRIC_TOLERANCE
-    meta = (reg.get(metric_id(opt)) or {}).get("meta") or {}
+    meta = (reg.get(opt["id"]) or {}).get("meta") or {}
     return meta.get("direction") or "", float(meta.get("tolerance") or 0.0)
 
 
@@ -88,8 +86,8 @@ def propose(b, scored, reg):
     """A limit for every open numeric check, from scored outputs: {label: {max|min|abs_max, from, ...}}.
     Needs at least two recipes with a value; a check with fewer gets none."""
     out = {}
-    for name, opt, spec in _checks(b):
-        if not _open(opt, spec):
+    for name, opt in _checks(b):
+        if not _open(opt):
             continue
         way, tol = direction(opt, reg)
         if way not in KEY:
@@ -135,8 +133,8 @@ def listed(b):
     """The frozen limits in use on this bench, for the report: [(label, 'at most 6.67', from)]."""
     word = {"max": "at most", "min": "at least", "abs_max": "within ±"}
     rows = []
-    for name, opt, _ in _checks(b):
+    for name, opt in _checks(b):
         if opt.get("limitFrom"):
-            key = next(k for k in ("max", "min", "abs_max") if k in opt)
+            key = next(k for k in KEY.values() if k in opt)
             rows.append((name, f"{word[key]} {_num(opt[key])}", opt["limitFrom"]))
     return rows

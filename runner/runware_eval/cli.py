@@ -93,9 +93,7 @@ def cmd_estimate(a):
     run.ensure_input_masks(b, out)
     run.ensure_recipe_masks(b, out, os.path.join(out, "media.lock.json"))
     jobs = bench.jobs(b, a.round, a.inputs, a.recipes)
-    runs_root = os.path.join(b["_dir"], "runs")
-    past = [r for d in (os.listdir(runs_root) if os.path.isdir(runs_root) else [])
-            for r in run.read_results(os.path.join(runs_root, d))]
+    past = [r for d in run_dirs(b) for r in run.read_results(d)]
     rows = run.estimate(jobs, run.read_results(out) + past)
     total = sum(r["est_cost"] or 0 for r in rows)
     by = {}
@@ -148,11 +146,10 @@ def cmd_score(a, b=None, out=None, results=None):
         if new:
             print(f"Limits set from this run for {len(new)} check(s), written to {limits.path(b)}:")
             for name, v in new.items():
-                key = next(k for k in ("max", "min", "abs_max") if k in v)
+                key = next(k for k in limits.KEY.values() if k in v)
                 print(f"  {name}: {key} {v[key]}  ({v['from']})")
             limits.attach(b)
-            data = score.score_all(b, out, results if results is not None else run.read_results(out),
-                                   judges=not getattr(a, "no_judges", False), maxSpend=bench.maxSpend(b))
+            data = score.recheck(b, data, out)  # the values just measured, against the limits just set
     print(f"Scored {len(data['scored'])} outputs → {os.path.join(out, 'scores.json')}")
     cmd_report(a, b, out)
 
@@ -233,13 +230,11 @@ def cmd_recipes(a):
             print(f"bench.yaml now lists them by id (backup: {a.bench}.pre-extract.bak)")
         return
     b = bench.load(a.bench)
-    runs_root = os.path.join(b["_dir"], "runs")
     seen = {}
-    if os.path.isdir(runs_root):
-        for d in os.listdir(runs_root):
-            for r in run.read_results(os.path.join(runs_root, d)):
-                if r.get("status") == "success" and r.get("fp"):
-                    seen[r["fp"]] = seen.get(r["fp"], 0) + 1
+    for d in run_dirs(b):
+        for r in run.read_results(d):
+            if r.get("status") == "success" and r.get("fp"):
+                seen[r["fp"]] = seen.get(r["fp"], 0) + 1
     print(f"{'id':36} {'fingerprint':17} {'runs':>4}  model")
     for r in b["recipes"]:
         flag = "  (edited: new fingerprint)" if r.get("_edited_from") else ""

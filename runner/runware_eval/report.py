@@ -10,13 +10,13 @@ from datetime import date
 
 import numpy as np
 from PIL import Image
-from skimage.color import deltaE_ciede2000, rgb2lab
+from skimage.color import deltaE_ciede2000
 
 from . import _labeling, catalog
 from ._assets import CSS, FONTS
 from .bench import ROUTER, stem
 from . import text as textmod
-from .score import JUDGED, Pair, coverage, erode, find_mask, input_rgb, label as metric_label, metric_id
+from .score import JUDGED, Pair, coverage, erode, find_mask, input_rgb, label as metric_label
 
 e = html.escape
 HEAT_MAX = 10.0
@@ -241,7 +241,7 @@ def place_recipes(b, scored, agg):
     direction = {}
     for dim, spec in (b.get("evaluate") or {}).items():
         for opt in spec.get("metrics", []):
-            meta = (reg.get(metric_id(opt)) or {}).get("meta", {})
+            meta = (reg.get(opt["id"]) or {}).get("meta", {})
             direction[f"{dim}:{metric_label(opt)}"] = "higher" if opt["id"] in JUDGED else meta.get("direction", "")
     cols, seen = [], {}
     for s in scored:
@@ -688,10 +688,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                         if len(v) > 1 and v[0] and len(set(v)) == 1)
     from . import models as models_mod
     old_model = {}  # outputs generated before their model's published details changed
-    try:
-        rows_ = [json.loads(line) for line in open(os.path.join(out_dir, "results.jsonl"), encoding="utf8") if line.strip()]
-    except OSError:
-        rows_ = []
+    from .run import read_results
+    rows_ = read_results(out_dir)
     for h, st in models_mod.stale([r for r in rows_ if r.get("status") == "success"], out_dir).items():
         rid = next(r["recipe"] for r in rows_ if r.get("hash") == h)
         x = old_model.setdefault((st["model"], st["since"], "; ".join(st["what"])), {})
@@ -951,7 +949,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     series_meta = {}
     for spec in (b.get("evaluate") or {}).values():
         for opt in spec.get("metrics", []):
-            unit = (reg.get(metric_id(opt)) or {}).get("meta", {}).get("unit")
+            unit = (reg.get(opt["id"]) or {}).get("meta", {}).get("unit")
             series_meta[metric_label(opt)] = {"unit": unit, **{k: opt[k] for k in ("min", "max") if k in opt}}
     payload = {"inputs": in_order, "order": order, "originals": originals, "cal": cal_data, "lab": lab_data, "best": best,
                "seriesMeta": series_meta,

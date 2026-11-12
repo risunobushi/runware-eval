@@ -10,11 +10,10 @@ later means adding one recipe and re-running. Results are cached by a hash of
 |---|---|
 | `goal` | The user's goal in their own words. |
 | `task` | Optional. One short sentence shown under the report's headline as "Task: ...". Without it the report uses the first sentence of `goal`. |
-| `inputs` | Files or URLs. Each may carry its own `region` masks and expected `text`. A `.txt` or `.md` file is a text input; `reference`, `terms` and `banned` are per-input facts for the text checks (see "Task types"). |
+| `inputs` | Files or URLs. Each may carry its own `regions` (masks or boxes) and expected `text` (the copy the OCR checks look for). A `.txt` or `.md` file is a text input; `reference`, `terms` and `banned` are per-input facts for the text checks (see "Task types"). |
 | `regions` | Named masks: a file path, or `auto:<model AIR>` to generate one on Runware (e.g. BiRefNet). |
-| `evaluate` | The dimensions the user chose. Per dimension: `metrics` (ids from `metrics.md`). A metric with a limit (`min`, `max`, `max_px`, `abs_max`, `mean_max`, `p95_max`, `dL_min`, `dL_max`, `aspect_tolerance`) is a pass/fail check; one without is measured only. Both count in the report: recipes are sorted by failed checks, then by average place on the measurements, then by cost. No `mode` is needed (a dimension-wide `mode: gate` or `mode: rank` from older benches still works). |
+| `evaluate` | The dimensions the user chose. Per dimension: `metrics` (ids from `metrics.md`). A metric with a limit (`min`, `max`, `max_px`, `abs_max`, `mean_max`, `p95_max`, `dL_min`, `dL_max`, `aspect_tolerance`) is a pass/fail check; one without is measured only. Both count in the report: recipes are sorted by failed checks, then by average place on the measurements, then by cost. Numeric checks are written without a limit: the first full run sets it (see "Limits set from the first full run"). |
 | `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `run` stops on a requirement nothing measures (unless it carries `notMeasured: "<why>"`, the user's choice) and warns about one that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
-| `calibration` | For judge or aesthetic metrics: how many outputs the user labels. |
 | `budget` | `maxSpend`: the most one full run may spend, in USD. The runner refuses to start above it. Not the Model Router's `maxPrice`, which is a ceiling for one request. |
 | `draws` | How many times each recipe runs on each input in the full run (default 3); the smoke round runs one. No seed is sent unless a recipe has `seed: $seed`, so every draw is a new generation: see "Draws and seeds". |
 | `passRule` | How draws decide a check, per input: `majority` (default), `all`, `any`. A recipe must pass on every input. |
@@ -328,7 +327,7 @@ favour whichever method copies pixels, so judge these with the vision panel and 
 
 A metric id in `evaluate` resolves to a file: first the bench's `metrics/` folder (or the folders in
 `metricDirs`, in order), then the runner's library. A bench file with a library id overrides it.
-`task_specific` + `name: x` is the older spelling of `id: x` and still works. Every score records the
+Every score records the
 metric's fingerprint (a hash of its file), so a changed metric is visible in the results.
 
 ## Other optional fields
@@ -344,50 +343,92 @@ metric's fingerprint (a hash of its file), so a changed metric is visible in the
 
 ## Example
 
+A whole bench: `bench.yaml`, one recipe file and one metric written for it. The numeric checks carry
+no limit: the first full run sets them (`limits.yaml`). The yes/no question needs none.
+
 ```yaml
-goal: "Add a soft contact shadow. The product and the backdrop colour must not change."
+# bench.yaml
+title: "Which model adds a contact shadow without touching the product?"
+task: "Add a soft contact shadow under the product."
+goal: >
+  Add a soft contact shadow under the product. The product and the backdrop colour must not change,
+  and the label must stay readable.
+
 inputs:
-  - { path: inputs/sneaker_side.png, regions: { product: auto:runware:112@5 } }
-  - { path: inputs/boot_front.png,   regions: { product: masks/boot_front.png } }
+  - { path: inputs/sneaker_side.png, regions: { product: "auto:" } }                    # outline made on Runware
+  - { path: inputs/boot_front.png,   regions: { product: masks/boot_front.png }, text: "NORTH TRAIL" }
+
+requirements:
+  - { need: "A soft shadow appears under the product",   checks: ["Contact shadow", "Shadow looks real (judges)"] }
+  - { need: "The product does not move or change size",  checks: ["Aspect", "Shift (px)", "Outline"] }
+  - { need: "The product keeps its colours",             checks: ["Product colour"] }
+  - { need: "The backdrop keeps its colour",             checks: ["Backdrop hue"] }
+  - { need: "The label stays readable",                  checks: ["Label text"] }
+  - { need: "No text is added",                          checks: ["Extra text"] }
 
 evaluate:
   pixel_shift:
     metrics:
-      - { id: size_aspect }
-      - { id: phase_correlation, max_px: 1 }
+      - { id: size_aspect, label: "Aspect" }
+      - { id: phase_correlation, label: "Shift (px)" }
+      - { id: mask_iou, region: product, label: "Outline" }
   deviation:
     metrics:
-      - { id: deltaE2000_region, region: product, mean_max: 1.0, p95_max: 2.0 }
-      - { id: ssim_region, region: product, min: 0.98 }
-      - { id: deltaE2000_region, region: not(product), mean_max: 1.5 }
+      - { id: deltaE2000_region, region: product, label: "Product colour" }
+      - { id: deltaE2000_region, region: not(product), ignore_lightness: true, label: "Backdrop hue" }
+  text_brand:
+    metrics:
+      - { id: ocr_cer, region: product, label: "Label text" }
+      - { id: ocr_extra_text, label: "Extra text" }
   prompt_adherence:
     metrics:
-      - { id: task_specific, name: contact_shadow, below: product, dL_min: 8, dL_max: 30 }
-  aesthetics:                  # no limits: measured, and used to place the recipes
-    metrics:
-      - { id: vlm_rubric, judges: [3 vision models from different providers] }
-      - { id: pairwise_human }
+      - { id: contact_shadow, label: "Contact shadow" }          # metrics/contact_shadow.py, written for this bench
+      - id: vlm_checklist
+        judges: $judges
+        label: "Shadow looks real (judges)"
+        questions:
+          - "Is there a soft shadow directly under the product in image 2?"
 
-calibration: { labelCount: 8 }
+judges: [google-gemini-3-1-flash-lite, anthropic-claude-haiku-4-5, openai-gpt-5-4-nano]
+maxModels: 3
 budget: { maxSpend: 5.00 }
-draws: 2
-
-recipes:
-  - id: precise-edit-high
-    model: "ideogram:4.5@precise-edit"
-    params: { quality: high, positivePrompt: "<shadow-only prompt>" }
-    mask: { region: product, polarity: edit_is_white, use: not(product) }
-    notes: "maskImage: white = edit, black = preserve. Pass the inverted product mask."
-  - id: precise-edit-very-low
-    model: "ideogram:4.5@precise-edit"
-    params: { quality: very_low, positivePrompt: "<shadow-only prompt>" }
-    mask: { region: product, polarity: edit_is_white, use: not(product) }
-    notes: "Cheapest tier of the same model. Tests whether pixel restoration holds at low quality."
-  - id: nano-banana-2-1
-    model: "google:nano-banana@2.1"
-    params: { positivePrompt: "<shadow-only prompt>" }
-    notes: "No mask input. Preservation relies on the prompt."
+draws: 3
+recipes: all                   # every file in recipes/
 ```
 
-The model IDs above are examples. Always confirm `live` status, `x-modes` and field names through
-`model_schema` before writing a recipe.
+```yaml
+# recipes/ideogram-precise-shadow.yaml
+id: ideogram-precise-shadow
+model: ideogram:4.5@precise-edit
+params:
+  inputs: { seedImage: $input, maskImage: $mask }
+  positivePrompt: >-
+    Add a soft, short contact shadow directly under the product. Change nothing else.
+  settings: { quality: high }
+mask: { edit: not(product), polarity: white_is_edit }   # this model edits where the mask is white
+price: 0.06
+notes: >-
+  maskImage: white = edit, black = keep, at the input's exact size. No seed is sent.
+```
+
+```python
+# metrics/contact_shadow.py
+"""How far the lightness drop under the product is from a soft shadow (0 = inside the wanted range)."""
+from runware_eval.metric_api import *  # noqa: F401,F403
+
+META = {"id": "contact_shadow", "family": "lighting", "trust": "deterministic", "kind": "change",
+        "needs": ["reference", "region"], "unit": "L* outside 8 to 30", "direction": "lower", "tolerance": 1.0,
+        "description": "Lightness drop in a band under the product against the input: 0 when it is a soft shadow (8 to 30 L*)."}
+
+
+def compute(p, opt):
+    ys, xs = np.nonzero(p.region("product"))
+    band = np.zeros((p.H, p.W), bool)
+    band[ys.max():ys.max() + max(4, p.H // 40), xs.min():xs.max()] = True
+    band &= ~p.region("product")
+    drop = float(np.median(p.lab_in[..., 0][band]) - np.median(p.lab_out[..., 0][band]))
+    return {"value": max(8 - drop, drop - 30, 0.0), "drop": drop}
+```
+
+The model ids are examples. Confirm status, price and field names with `runware model pricing <air>` and
+`runware model schema <air>` before writing a recipe.

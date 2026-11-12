@@ -76,8 +76,8 @@ searches, or model knowledge from memory.
   downloads if needed. Nothing is installed into the user's Python (they need none), so no admin
   rights, PATH changes or dependency clashes.
 
-No MCP server is needed: every catalog question goes through the CLI, and the runner does the paid
-work. Both work in any agent with a shell, and nothing needs a restart.
+Every catalog question goes through the CLI, and the runner does the paid work. Both work in any
+agent with a shell, and nothing needs a restart.
 
 ### 1. Check both (read-only)
 
@@ -162,7 +162,7 @@ it is how users discover dimensions they had not thought of.
    | Text & brand | Is the copy and logo exactly right? |
    | Prompt adherence | Did it do what the brief asked? |
    | Aesthetics | Is it good? (subjective — needs calibration) |
-   | Technical quality | Is it clean? (sharpness, artefacts, banding) |
+   | Technical quality | Is it clean? (sharpness, artefacts, seams) |
 
    Cost, speed and failure rate are always measured. Say so.
 3. **Follow-ups only for the chosen dimensions**: which region must stay fixed (do they have masks,
@@ -449,8 +449,8 @@ or masking bench needs a **reference outline** they trust for each input (ask fo
 have them correct it; never from a model under test); a text bench needs its **inputs as text files**
 and, per input, what a good answer must contain or must not say; and text answers are **judged by text
 models**, so keep the models under test off the judge panel. Audio, prompt enhancement and ControlNet
-preprocessing are not supported yet: say so instead of improvising. Metrics marked `planned` in the
-registry (OCR) show as *not run* in the report. Say so; never present them as passed.
+preprocessing are not supported yet: say so instead of improvising. A check that could not run on an
+output shows as *not run* in the report, with the reason. Say so; never present it as passed.
 
 **Before reporting, check the limits and the standings against the outputs.** A check that every
 recipe fails, or one that passes something visibly wrong (e.g. a hue-only backdrop check passing a
@@ -478,7 +478,6 @@ pass/fail limits are set" means Step 2, point 6 was skipped.
 | "I'll just print the install command for the user" | If you can run it, run it. Leave the user only the sign-in. |
 | "I'll ask for the key so I can run `runware auth login --key`" | Never. The user signs in at the CLI prompt in their own terminal. |
 | "There's already a bench for this; I'll pick up where it left off" | Mention it and ask. A new request is a new bench unless the user says otherwise. |
-| "I'll install the Runware MCP too" | Not needed: the CLI covers the catalog and the runner does the work. One sign-in, no restart. |
 
 ## Quality bar
 

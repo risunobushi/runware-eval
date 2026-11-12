@@ -1,8 +1,8 @@
 """Score outputs against the `evaluate` block of bench.yaml. Writes scores.json.
 
-Each metric returns named values; gates compare them with the thresholds written next to the
-metric in bench.yaml (min, max, mean_max, p95_max, max_px, aspect_tolerance, abs_max, or a
-legacy `rule: "... >= 3"`). Metrics not implemented yet are reported as `not_run`, never as passes.
+Each metric returns named values; a check compares them with the limits written next to the metric
+in bench.yaml or frozen in limits.yaml (min, max, mean_max, p95_max, max_px, aspect_tolerance, abs_max).
+A metric id with no file behind it is reported as `not_run`, never as a pass.
 """
 import glob
 import hashlib
@@ -10,11 +10,9 @@ import json
 import os
 import re
 
-import cv2
 import numpy as np
 from PIL import Image
-from skimage.color import deltaE_ciede2000, rgb2lab
-from skimage.metrics import structural_similarity
+from skimage.color import rgb2lab
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -43,8 +41,6 @@ def load_mask(path, size):
     if a.size != size:
         a = a.resize(size, Image.BILINEAR)
     return np.asarray(a) > 127
-
-
 
 
 def input_region(b, inp, spec):
@@ -137,9 +133,6 @@ def check(vals, opt):
                   ("dL_min", lambda t: v >= t), ("dL_max", lambda t: v <= t)):
         if k in opt:
             tests.append(fn(opt[k]))
-    m = re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
-    if m:
-        tests.append(v >= float(m.group(2)) if m.group(1) == ">=" else v <= float(m.group(2)))
     if not tests and opt.get("id") in YES_NO and isinstance(vals.get("yes"), bool):
         return vals["yes"]  # a yes/no question is its own limit: yes passes
     return all(tests) if tests else None
@@ -149,14 +142,24 @@ YES_NO = ("vlm_checklist", "vlm_same_object")  # judge checks that answer yes or
 LIMIT_KEYS = ("min", "max", "max_px", "aspect_tolerance", "abs_max", "mean_max", "p95_max", "dL_min", "dL_max")
 
 
-def row_mode(spec, opt):
+def row_mode(opt):
     """A measurement with a limit next to it is a pass/fail check ("gate"); without one it only places
-    the recipes ("rank"). Nobody has to choose: the report uses both. A dimension-wide `mode` from an
-    older bench still wins."""
-    if spec.get("mode"):
-        return spec["mode"]
-    limited = any(k in opt for k in LIMIT_KEYS) or re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
-    return "gate" if limited or opt.get("id") in YES_NO else "rank"
+    the recipes ("rank"). Nobody has to choose: the report uses both."""
+    return "gate" if any(k in opt for k in LIMIT_KEYS) or opt.get("id") in YES_NO else "rank"
+
+
+NOT_LIMITS = ("id", "label", "region", "on", "judges", "questions", "rubric", "scale", "terms", "banned", "keys",
+              "pattern", "case", "field", "strict", "min_share", "edge_pct", "limit", "limitFrom", "text", "min_conf")
+
+
+def thresholds(opt):
+    """What a row records of its check: the limits and the metric's own options."""
+    return {k: v for k, v in opt.items() if k not in NOT_LIMITS}
+
+
+def all_checks(b):
+    """Every check of the bench: (dimension, its entry in `evaluate`)."""
+    return [(dim, opt) for dim, spec in (b.get("evaluate") or {}).items() for opt in spec.get("metrics", [])]
 
 
 def coverage(b):
@@ -165,9 +168,8 @@ def coverage(b):
     hole a recipe can fall through unnoticed. A requirement the user chose to leave out says so
     (`notMeasured: <why>`) and is listed as such; `coverage_errors` names the holes that stop a run."""
     limits = {}
-    for spec in (b.get("evaluate") or {}).values():
-        for opt in spec.get("metrics", []):
-            limits[label(opt)] = row_mode(spec, opt) == "gate"
+    for _, opt in all_checks(b):
+        limits[label(opt)] = row_mode(opt) == "gate"
     rows, warn = [], []
     reqs = b.get("requirements") or []
     if not reqs:
@@ -220,7 +222,7 @@ def plan(b, reg):
     rows = []
     for dim, spec in (b.get("evaluate") or {}).items():
         for opt in spec.get("metrics", []):
-            m = reg.get(metric_id(opt)) or {}
+            m = reg.get(opt["id"]) or {}
             if opt.get("id") in JUDGED:  # built in, not a metric file
                 m = {"source": "library", "meta": {"trust": "judge", "description": {
                     "vlm_checklist": "Yes/no questions put to the vision judges; passes when most judges say yes to every question.",
@@ -234,7 +236,7 @@ def plan(b, reg):
                 limit = "worse than the typical recipe (set from the first full run)"
             if not limit and opt.get("id") in YES_NO:
                 limit = "yes on every question"
-            rows.append({"label": label(opt), "id": metric_id(opt), "dimension": dim,
+            rows.append({"label": label(opt), "id": opt["id"], "dimension": dim,
                          "origin": {"bench": "written for this bench", "library": "library"}.get(m.get("source"), m.get("source") or "unknown"),
                          "trust": (m.get("meta") or {}).get("trust", ""), "limit": limit or "none (measured only)",
                          "needs": need_of.get(label(opt), []), "what": (m.get("meta") or {}).get("description", ""),
@@ -244,10 +246,8 @@ def plan(b, reg):
 
 NAMES = {
     "size_aspect": "Aspect", "phase_correlation": "Shift", "mask_iou": "Outline", "deltaE2000_region": "Colour",
-    "ssim_region": "Structure", "sharpness_laplacian": "Sharpness", "lr_lighting_shift": "Key light",
-    "shading_contrast": "Contrast", "backdrop_lightness": "Backdrop light", "contact_shadow": "Contact shadow",
-    "ocr_cer": "Text", "ocr_extra_text": "Extra text", "vlm_checklist": "Judge checklist", "vlm_rubric": "Judge rubric",
-    "vlm_same_object": "Same object", "pairwise_human": "Human ranking", "dino_similarity": "Identity",
+    "ssim_region": "Structure", "sharpness_laplacian": "Sharpness", "ocr_cer": "Text", "ocr_extra_text": "Extra text",
+    "vlm_checklist": "Judge checklist", "vlm_rubric": "Judge rubric", "vlm_same_object": "Same object",
 }
 REGION_NAMES = {"product": "", "not(product)": "backdrop"}
 
@@ -256,19 +256,13 @@ def label(opt):
     """Readable column name. `label:` in bench.yaml wins; otherwise metric name plus region."""
     if opt.get("label"):
         return opt["label"]
-    key = opt.get("name") or opt["id"]
-    name = NAMES.get(key, key.replace("_", " ").capitalize())
+    name = NAMES.get(opt["id"], opt["id"].replace("_", " ").capitalize())
     region = opt.get("region")
     region = REGION_NAMES.get(region, region) if region else ""
     return f"{name} ({region})" if region else name
 
 
 JUDGED = ("vlm_checklist", "vlm_same_object", "vlm_rubric")
-
-
-def metric_id(opt):
-    """`task_specific` + `name` is the older spelling of a metric id; both work."""
-    return opt.get("name") if opt["id"] == "task_specific" else opt["id"]
 
 
 def score_pair(b, p, pending=None, recipe=None, reg=None):
@@ -278,14 +272,8 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
     reg = reg if reg is not None else catalog.load(b)
     for dim, spec in (b.get("evaluate") or {}).items():
         for opt in spec.get("metrics", []):
-            row = {"dimension": dim, "mode": row_mode(spec, opt), "id": opt["id"], "label": label(opt),
-                   "thresholds": {k: v for k, v in opt.items() if k not in (
-                       "id", "name", "label", "region", "rule", "on", "judges", "questions", "rubric", "scale",
-                       "terms", "banned", "keys", "pattern", "case", "field", "strict", "min_share", "edge_pct",
-                       "limit", "limitFrom")}}
-            legacy = re.search(r"(>=|<=)\s*(-?[\d.]+)\s*$", str(opt.get("rule", "")))
-            if legacy:  # an older `rule: "... >= 3"`: record it as min / max so calibration can read it
-                row["thresholds"].setdefault("min" if legacy.group(1) == ">=" else "max", float(legacy.group(2)))
+            row = {"dimension": dim, "mode": row_mode(opt), "id": opt["id"], "label": label(opt),
+                   "thresholds": thresholds(opt)}
             if opt["id"] in JUDGED:
                 if pending is None:
                     rows.append({**row, "status": "not_run", "note": "vision judges switched off"})
@@ -294,10 +282,10 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
                     rows.append(row)
                     pending.append((row, p, opt))
                 continue
-            m = reg.get(metric_id(opt))
+            m = reg.get(opt["id"])
             if m is None:
                 rows.append({**row, "status": "not_run",
-                             "note": f"no metric file '{metric_id(opt)}' in the library or the bench's metrics/"})
+                             "note": f"no metric file '{opt["id"]}' in the library or the bench's metrics/"})
                 continue
             fn = m["compute"]
             row.update(metric_fp=m["fp"], metric_source=m["source"])
@@ -311,7 +299,7 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
                 continue
             if m["meta"].get("copy_sensitive") and opt.get("region") in copied:
                 rows.append({**row, "status": "not_run",
-                             "note": f"copied from the original by this recipe: a pass would be by construction"})
+                             "note": "copied from the original by this recipe: a pass would be by construction"})
                 continue
             try:
                 vals = fn(p, opt)
@@ -335,9 +323,9 @@ def controls(b, reg):
         p = Pair(b, inp, src, mask)
         for dim, spec in (b.get("evaluate") or {}).items():
             for opt in spec.get("metrics", []):
-                if row_mode(spec, opt) != "gate":
+                if row_mode(opt) != "gate":
                     continue
-                m = reg.get(metric_id(opt))
+                m = reg.get(opt["id"])
                 if m is None or opt["id"] in JUDGED or m["meta"].get("kind") not in ("preserve", "change"):
                     continue
                 try:
@@ -412,18 +400,43 @@ def find_mask(out_dir, fname, recipe):
     return None
 
 
-def judge_calls(b):
-    """Vision-model calls one judged output needs: one combined call per image set, per judge."""
-    sets = {o.get("region") for spec in (b.get("evaluate") or {}).values() for o in spec.get("metrics", [])
-            if o["id"] in JUDGED}
-    return len(sets) * len(b.get("judges") or judge_mod.DEFAULT_JUDGES)
-
-
 def pixel_fails(metrics):
     return sum(1 for m in metrics if m["mode"] == "gate" and m["id"] not in JUDGED and m.get("pass") is False)
 
 
 OUT_RE = re.compile(r"(.+?)__(.+?)__s(\d+)\.\w+$")
+
+
+def spent_on(results):
+    """What a run folder's results cost: generations made here (not the ones copied from another
+    folder) plus everything spent on outlines for them."""
+    return sum((0 if r.get("reused_from") else (r.get("spend", r.get("cost")) or 0)) + (r.get("eval_cost") or 0)
+               for r in results)
+
+
+def recheck(b, data, out_dir):
+    """Limits were just set from this scoring (limits.py): judge the values it measured against them.
+    Nothing is measured again, and no judge is asked again."""
+    by_label = {label(opt): opt for _, opt in all_checks(b)}
+    max_failed = (b.get("judgeWhen") or {}).get("maxFailedChecks", 1)
+    for entry in data["scored"]:
+        for row in entry["metrics"]:
+            opt = by_label[row["label"]]
+            row.update(mode=row_mode(opt), thresholds=thresholds(opt))
+            if row["status"] == "ok":
+                row["pass"] = check(row["values"], opt) if row["mode"] == "gate" else None
+        # the judge funnel, as any later scoring applies it: an output that now fails too many pixel checks
+        # is not judged, so the answers it got before there were limits are not counted
+        fails = pixel_fails(entry["metrics"])
+        if fails > max_failed:
+            for row in entry["metrics"]:
+                if row["id"] in JUDGED and row["status"] == "ok":
+                    for k in ("values", "pass"):
+                        row.pop(k, None)
+                    row.update(status="not_run", note=f"skipped: failed {fails} pixel checks")
+    data["controls"] = controls(b, catalog.load(b))  # the new limits are tested on unchanged inputs too
+    json.dump(data, open(os.path.join(out_dir, "scores.json"), "w", encoding="utf8"), indent=1)
+    return data
 
 
 def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
@@ -533,8 +546,7 @@ def score_all(b, out_dir, results=None, judges=True, maxSpend=None, log=print):
         # budget check after the pixel funnel: only outputs that will actually be judged count
         calls = len(pending) * len(panel.judges)
         projected = calls * judge_mod.EST_COST_PER_CALL
-        spent = sum((0 if r.get("reused_from") else (r.get("spend", r.get("cost")) or 0)) + (r.get("eval_cost") or 0)
-                    for r in (results or []))
+        spent = spent_on(results or [])
         log(f"Vision judges: {len(pending)} output(s) passed the pixel funnel (at most {max_failed} failed "
             f"check(s)); up to {calls} calls, about ${projected:.2f} (cached answers are free).")
         if maxSpend is not None and spent + projected > maxSpend:

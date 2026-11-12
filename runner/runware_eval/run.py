@@ -14,9 +14,10 @@ from PIL import Image
 from . import api
 from . import bench as benchmod
 from . import video as video_mod
-from .score import input_region
+from .score import input_region, spent_on
 
 MASK_MODEL = "runware:112@5"  # BiRefNet General
+IDS = ("input", "recipe", "seed", "model", "fp", "hash")  # what names a result
 OWN_OUTLINE = ("removeBackground", "imageMasking")
 
 
@@ -153,6 +154,15 @@ def mask_from(url, path, model=None):
     return res.get("cost") or 0.0
 
 
+def outline(row, source, out_dir):
+    """Buy the product outline of an output (`source`: its URL or a data URI) for the outline checks.
+    The cost goes on the row; a failure is noted and never loses the paid output."""
+    try:
+        row["eval_cost"] = mask_from(source, os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
+    except RuntimeError as e:
+        row["mask_error"] = str(e)
+
+
 def data_uri(path):
     """A local picture as a data URI, for tasks on files that were never uploaded (video frames)."""
     import base64
@@ -211,13 +221,6 @@ def fill_video_masks(out_dir, budget, log=print, per_mask=0.001):
             f.write(json.dumps(r) + "\n")
 
 
-def spent_on(results):
-    """What a run folder's results cost: generations made here (not the ones copied from another
-    folder) plus everything spent on outlines for them."""
-    return sum((0 if r.get("reused_from") else (r.get("spend", r.get("cost")) or 0)) + (r.get("eval_cost") or 0)
-               for r in results)
-
-
 def history(dirs):
     """Successful results by content key across run folders, with the folder they live in."""
     found = {}
@@ -238,7 +241,7 @@ def reuse(j, src_dir, src, out_dir):
         m_src = os.path.join(src_dir, "masks", old + tail)
         if os.path.exists(m_src):
             shutil.copyfile(m_src, os.path.join(out_dir, "masks", new + tail))
-    row = {**src, **{k: j[k] for k in ("input", "recipe", "seed", "model", "fp", "hash")},
+    row = {**src, **{k: j[k] for k in IDS},
            "file": name, "reused_from": os.path.abspath(src_dir), "eval_cost": 0.0}
     return row
 
@@ -279,7 +282,7 @@ def run_pipeline(j, b, out_dir, bases, lock_path, journal=None):
     """Base generation (reused when an identical plain recipe already produced it), then the recipe's
     `then` step (a second task on the first output) and `post` steps (local edits)."""
     r, inp = j["_recipe"], j["_inp"]
-    row = {k: j[k] for k in ("input", "recipe", "seed", "model", "fp", "hash", "base_hash")}
+    row = {k: j[k] for k in IDS + ("base_hash",)}
     row.update(status="success", cost=0.0, spend=0.0, latency_s=0.0, steps=[])
     os.makedirs(os.path.join(out_dir, "steps"), exist_ok=True)
     stem_ = f"{j['input']}__{j['recipe']}__s{j['seed']}"
@@ -311,9 +314,7 @@ def run_pipeline(j, b, out_dir, bases, lock_path, journal=None):
             mpath = os.path.join(out_dir, "masks", stem_ + "__step2_mask.png")
             Image.fromarray((white * 255).astype(np.uint8)).resize((w, h), Image.NEAREST).save(mpath)
             ctx["mask_url"] = benchmod.upload(mpath, os.path.abspath(mpath), lock_path)["url"]
-        params = benchmod.resolve(then.get("params", {}), ctx)
-        task = {"taskType": then.get("taskType", "imageInference"), "taskUUID": str(uuid.uuid4()),
-                "model": then["model"], **params, "includeCost": True}
+        task = benchmod.then_task(then, ctx)
         res = run_once(journal, j["hash"] + ":then", task)
         if res["status"] != "success":
             return {**row, "status": "error", "error": f"then-step: {res.get('error')}"}
@@ -342,19 +343,22 @@ def run_pipeline(j, b, out_dir, bases, lock_path, journal=None):
     row["file"] = stem_ + os.path.splitext(cur_path)[1]
     shutil.copyfile(cur_path, os.path.join(out_dir, row["file"]))
     row["url"] = cur_url
-    try:  # product outline: post steps only touch small regions, so the pre-post image is used
-        row["eval_cost"] = mask_from(pre_post_url, os.path.join(out_dir, "masks", stem_ + "_cut.png"))
-    except RuntimeError as e:
-        row["mask_error"] = str(e)
+    outline(row, pre_post_url, out_dir)  # post steps only touch small regions, so the pre-post image is used
     row["latency_s"] = round(row["latency_s"], 1)
     return row
 
 
+def outdated(r, model_fps):
+    """A result generated under an older record of its model (models.py). Rows with no stamp (made
+    before the record existed) and models with no record today are left alone."""
+    return bool(r.get("model_fp")) and model_fps.get(r.get("model")) not in (None, r["model_fp"])
+
+
 def drop_outdated(out_dir, model_fps):
     """Take results generated under an older model record out of results.jsonl, so they are made again.
-    Rows with no stamp (made before the record existed) are left alone. Returns the dropped rows."""
+    Returns the dropped rows."""
     rows = read_results(out_dir)
-    old = [r for r in rows if r.get("model_fp") and model_fps.get(r.get("model")) not in (None, r["model_fp"])]
+    old = [r for r in rows if outdated(r, model_fps)]
     if old:
         gone = {id(r) for r in old}
         with open(os.path.join(out_dir, "results.jsonl"), "w", encoding="utf8") as f:
@@ -370,7 +374,6 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
     new result is stamped with it. `regenerate`: results stamped with an older fingerprint are made again."""
     os.makedirs(os.path.join(out_dir, "masks"), exist_ok=True)
     model_fps = model_fps or {}
-    fresh = lambda r: not (regenerate and r.get("model_fp") and model_fps.get(r.get("model")) not in (None, r["model_fp"]))
     redo = {r["hash"] for r in drop_outdated(out_dir, model_fps)} if regenerate else set()
     if redo:
         log(f"Making {len(redo)} result(s) again: their model's published details changed since they were generated.")
@@ -378,7 +381,7 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
     done = {r["hash"] for r in results if r.get("status") == "success"
             and os.path.exists(os.path.join(out_dir, r["file"]))}
     past = {h: v for h, v in history([d for d in history_dirs if os.path.abspath(d) != os.path.abspath(out_dir)]).items()
-            if fresh(v[1])}
+            if not (regenerate and outdated(v[1], model_fps))}
     reused = 0
     for j in jobs:
         if j["hash"] not in done and j["hash"] in past:
@@ -408,14 +411,13 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
         journal.last.pop(h, None)
     stamp = lambda row: {**row, "model_fp": model_fps[row["model"]]} if model_fps.get(row.get("model")) else row
     est_by = {e["hash"]: e["est_cost"] for e in est}
-    ids = ("input", "recipe", "seed", "model", "fp", "hash")
     frame_masks = ((b or {}).get("video") or {}).get("masks", True)
 
     def guarded(fn):
         """The projection above is an estimate; this holds the cap against what tasks really cost."""
         def wrapped(j):
             if not budget.take(j["recipe"], est_by.get(j["hash"])):
-                return {**{k: j.get(k) for k in ids}, "status": "error", "cost": None, "latency_s": None,
+                return {**{k: j.get(k) for k in IDS}, "status": "error", "cost": None, "latency_s": None,
                         "not_started": True, "error": f"not started: it would pass the ${maxSpend:.2f} cap "
                                                       f"(${budget.spent:.3f} spent, costs ran above the estimate)"}
             actual = None
@@ -429,7 +431,7 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
 
     def one(j):
         res = run_once(journal, j["hash"], j["task"])
-        row = {k: j[k] for k in ids}
+        row = {k: j[k] for k in IDS}
         row.update(taskUUID=res.get("taskUUID") or j["task"]["taskUUID"], status=res["status"],
                    cost=res.get("cost"), latency_s=res.get("latency_s"), error=res.get("error"))
         if res.get("resumed"):
@@ -453,11 +455,7 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
                     f.write(raw)
                 if res.get("gpu_seconds") is not None:
                     row["gpu_seconds"] = res["gpu_seconds"]
-                try:
-                    row["eval_cost"] = mask_from(data_uri(os.path.join(out_dir, row["file"])),
-                                                 os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
-                except RuntimeError as e:
-                    row["mask_error"] = str(e)
+                outline(row, data_uri(os.path.join(out_dir, row["file"])), out_dir)
                 return row
             if not url and isinstance(res.get("text"), str):
                 # caption and textInference answer with text, not a file: the text is the output
@@ -475,10 +473,7 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
             # a product outline for the outline checks, made on Runware. Not for 3D and vector outputs (no
             # picture to cut), nor for cut-outs and masks: those are their own outline (see adapters.py)
             if ext.lower() in (".png", ".jpg", ".jpeg", ".webp") and row["task_type"] not in OWN_OUTLINE:
-                try:
-                    row["eval_cost"] = mask_from(url, os.path.join(out_dir, "masks", row["file"].rsplit(".", 1)[0] + "_cut.png"))
-                except RuntimeError as e:
-                    row["mask_error"] = str(e)
+                outline(row, url, out_dir)
             elif video_mod.is_video(row["file"]) and frame_masks:
                 # the same for a clip: an outline for each sample frame (see video_masks)
                 try:
@@ -500,7 +495,7 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
             try:
                 return fn(j)
             except Exception as exc:  # noqa: BLE001  one output's failure must not stop the run
-                return {**{k: j.get(k) for k in ("input", "recipe", "seed", "model", "fp", "hash")},
+                return {**{k: j.get(k) for k in IDS},
                         "status": "error", "error": f"{type(exc).__name__}: {exc}", "cost": None, "latency_s": None}
         return wrapped
 

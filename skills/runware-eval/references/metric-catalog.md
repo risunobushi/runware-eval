@@ -5,43 +5,45 @@ metric's file and regenerate. This is the curated library; a bench can add its o
 
 | id | kind | family | trust | needs | unit / direction | source | fingerprint |
 |---|---|---|---|---|---|---|---|
-| `deltaE2000_region` | preserve | colorimetric | deterministic | reference, region | ΔE2000 lower | library | `6365b592` |
-| `seam_jump` | preserve | compositing | deterministic | reference, region | L* step lower | library | `fcaf1ee9` |
-| `detail_similarity` | preserve | detail | deterministic | reference, region | NCC higher | library | `6f404af3` |
-| `bbox_aspect` | preserve | geometric | deterministic | reference, region | ratio error lower | library | `797a2b6a` |
-| `keypoint_match` | info | geometric | deterministic | reference, region | share matched higher | library | `3c59e488` |
-| `mask_boundary_px` | preserve | geometric | deterministic | reference, region | px lower | library | `c177f08d` |
+| `deltaE2000_region` | preserve | colorimetric | deterministic | reference, region | ΔE2000 lower | library | `9d7da79d` |
+| `seam_jump` | preserve | compositing | deterministic | reference, region | L* step lower | library | `18d9f287` |
+| `detail_similarity` | preserve | detail | deterministic | reference, region | NCC higher | library | `457eb582` |
+| `bbox_aspect` | preserve | geometric | deterministic | reference, region | ratio error lower | library | `af34e346` |
+| `keypoint_match` | info | geometric | deterministic | reference, region | share matched higher | library | `e36837b1` |
+| `mask_boundary_px` | preserve | geometric | deterministic | reference, region | px lower | library | `32990bf3` |
 | `mask_box_fill` | info | geometric | deterministic | — | share of its box  | library | `20b935ff` |
-| `mask_extra` | preserve | geometric | deterministic | reference, region | share of the reference lower | library | `28e458af` |
-| `mask_inside` | preserve | geometric | deterministic | reference, region | share of the mask higher | library | `c1a690dd` |
-| `mask_iou` | preserve | geometric | deterministic | reference, region | IoU higher | library | `d75569e8` |
-| `mask_missing` | preserve | geometric | deterministic | reference, region | share of the reference lower | library | `783de562` |
+| `mask_extra` | preserve | geometric | deterministic | reference, region | share of the reference lower | library | `5716230a` |
+| `mask_inside` | preserve | geometric | deterministic | reference, region | share of the mask higher | library | `b8238e14` |
+| `mask_iou` | preserve | geometric | deterministic | reference, region | IoU higher | library | `dfa03739` |
+| `mask_missing` | preserve | geometric | deterministic | reference, region | share of the reference lower | library | `78a8397c` |
 | `mask_pieces` | info | geometric | deterministic | — | pieces lower | library | `0fa4c6ac` |
 | `mask_selected_share` | info | geometric | deterministic | — | share of the frame  | library | `7e7bbecd` |
-| `phase_correlation` | preserve | geometric | deterministic | reference, region | px lower | library | `14f42359` |
-| `size_aspect` | preserve | geometric | deterministic | reference | aspect ratio error lower | library | `8213e06e` |
-| `size_kept` | preserve | geometric | deterministic | reference | × input higher | library | `1613224d` |
-| `upscale_factor` | info | geometric | deterministic | reference | × input higher | library | `516371df` |
+| `phase_correlation` | preserve | geometric | deterministic | reference, region | px lower | library | `c9ff0176` |
+| `size_aspect` | preserve | geometric | deterministic | reference | aspect ratio error lower | library | `0306c97a` |
+| `size_kept` | preserve | geometric | deterministic | reference | × input higher | library | `0c226b9c` |
+| `upscale_factor` | info | geometric | deterministic | reference | × input higher | library | `b5bb4954` |
 | `mesh_faces` | info | mesh | deterministic | mesh | faces  | library | `6ff23914` |
 | `mesh_file_mb` | info | mesh | deterministic | mesh | MB  | library | `8db6eef6` |
 | `mesh_parts` | info | mesh | deterministic | mesh | count  | library | `c1edac4d` |
 | `mesh_texture_px` | info | mesh | deterministic | mesh | px  | library | `beb5074c` |
 | `mesh_watertight` | info | mesh | deterministic | mesh | 1 / 0  | library | `bad14b2b` |
+| `ocr_cer` | info | ocr | learned | reference | character error rate lower | library | `c7f40f31` |
+| `ocr_extra_text` | preserve | ocr | learned | reference | unexpected words lower | library | `bd896811` |
 | `alpha_edge_softness` | info | signal | deterministic | — | px  | library | `43d3ce7c` |
-| `alpha_opacity` | preserve | signal | deterministic | reference, region | mean alpha higher | library | `cc791229` |
-| `sharpness_laplacian` | info | signal | deterministic | reference, region | × input higher | library | `a5bc32ac` |
-| `upscale_detail_gain` | info | signal | deterministic | reference | × plain resize higher | library | `44ba8c21` |
-| `upscale_truth_psnr` | info | signal | deterministic | reference | dB higher | library | `cd478750` |
-| `ssim_region` | preserve | structural | deterministic | reference, region | SSIM higher | library | `7e925062` |
-| `upscale_truth_ssim` | info | structural | deterministic | reference | SSIM higher | library | `d77a840f` |
+| `alpha_opacity` | preserve | signal | deterministic | reference, region | mean alpha higher | library | `de7c6dec` |
+| `sharpness_laplacian` | info | signal | deterministic | reference, region | × input higher | library | `46d379f6` |
+| `upscale_detail_gain` | info | signal | deterministic | reference | × plain resize higher | library | `7775d6c2` |
+| `upscale_truth_psnr` | info | signal | deterministic | reference | dB higher | library | `083a1239` |
+| `ssim_region` | preserve | structural | deterministic | reference, region | SSIM higher | library | `641a1c8c` |
+| `upscale_truth_ssim` | info | structural | deterministic | reference | SSIM higher | library | `33002f22` |
 | `text_banned` | info | text | deterministic | text_output | terms found lower | library | `5f404c98` |
 | `text_json` | info | text | deterministic | text_output | 1 / 0 higher | library | `04ee7650` |
 | `text_output_tokens` | info | text | deterministic | text_output | tokens lower | library | `9abb65cd` |
 | `text_reasoning_leak` | info | text | deterministic | text_output | words lower | library | `b3060630` |
-| `text_reference_f1` | info | text | deterministic | text_output, reference | F1 higher | library | `a54f8ded` |
+| `text_reference_f1` | info | text | deterministic | text_output, reference | F1 higher | library | `66f7f925` |
 | `text_regex` | info | text | deterministic | text_output | 1 / 0 higher | library | `f26ae16f` |
 | `text_sentences` | info | text | deterministic | text_output | sentences  | library | `bec1c69c` |
-| `text_terms` | info | text | deterministic | text_output | share found higher | library | `71903cb0` |
+| `text_terms` | info | text | deterministic | text_output | share found higher | library | `04adc7a4` |
 | `text_truncated` | info | text | deterministic | text_output | 1 / 0 lower | library | `b42cbe84` |
 | `text_words` | info | text | deterministic | text_output | words  | library | `545916af` |
 | `svg_colours` | info | vector | deterministic | — | colours  | library | `659aac76` |
@@ -49,18 +51,18 @@ metric's file and regenerate. This is the curated library; a bench can add its o
 | `svg_images` | info | vector | deterministic | — | bitmaps lower | library | `5e940a82` |
 | `svg_nodes` | info | vector | deterministic | — | nodes lower | library | `ffa822a3` |
 | `svg_shapes` | info | vector | deterministic | — | shapes lower | library | `f240d097` |
-| `video_color_drift` | preserve | video | deterministic | video | ΔE2000 lower | library | `45d46b77` |
+| `video_color_drift` | preserve | video | deterministic | video | ΔE2000 lower | library | `4af5b1c8` |
 | `video_duration` | info | video | deterministic | video | s  | library | `2a1e88cd` |
-| `video_flicker` | info | video | deterministic | video | L* lower | library | `a5dbc74f` |
-| `video_frozen_frames` | info | video | deterministic | video | share of clip lower | library | `cb6e6f34` |
-| `video_letterbox` | info | video | deterministic | video | share of frame lower | library | `3df76304` |
+| `video_flicker` | info | video | deterministic | video | L* lower | library | `35ed4afa` |
+| `video_frozen_frames` | info | video | deterministic | video | share of clip lower | library | `c42d4319` |
+| `video_letterbox` | info | video | deterministic | video | share of frame lower | library | `d2625500` |
 | `video_motion` | change | video | deterministic | video | % of diagonal / s higher | library | `8bcfb71f` |
-| `video_outline_hold` | preserve | video | deterministic | video, reference, region | IoU higher | library | `18bdef48` |
+| `video_outline_hold` | preserve | video | deterministic | video, reference, region | IoU higher | library | `7f8c500f` |
 | `video_product_area` | info | video | deterministic | video, reference, region | × input area  | library | `fa17950f` |
-| `video_product_drift` | preserve | video | deterministic | video, reference, region | histogram distance lower | library | `db0ee2b2` |
-| `video_scene_hold` | preserve | video | deterministic | video | histogram distance lower | library | `bb3426bb` |
-| `video_sharpness_hold` | info | video | deterministic | video | × first frame higher | library | `a39b0390` |
-| `video_texture_stability` | info | video | deterministic | video | L* residual lower | library | `c51746af` |
+| `video_product_drift` | preserve | video | deterministic | video, reference, region | histogram distance lower | library | `132606d8` |
+| `video_scene_hold` | preserve | video | deterministic | video | histogram distance lower | library | `33fa9abb` |
+| `video_sharpness_hold` | info | video | deterministic | video | × first frame higher | library | `63516b47` |
+| `video_texture_stability` | info | video | deterministic | video | L* residual lower | library | `b2400c55` |
 
 - **`alpha_edge_softness`**: Width of the cut-out's semi-transparent edge, in pixels at the input's size: about 0 is a hard, jagged edge, 1 to 3 a clean anti-aliased one, more a soft matte (hair, fur, glass) or a halo. No better direction on its own.
 - **`alpha_opacity`**: How solid the cut-out is inside the reference region, away from its edge: mean alpha, 1 = fully opaque. Below about 0.99 the subject itself was left partly see-through (the new background will show through it). Also reports the share of pixels under 90% opacity.
@@ -81,6 +83,8 @@ metric's file and regenerate. This is the curated library; a bench can add its o
 - **`mesh_parts`**: Connected components of a 3D output (thousands = fragmented).
 - **`mesh_texture_px`**: Largest base-colour texture of a 3D output (0 = untextured).
 - **`mesh_watertight`**: Is the 3D output a closed surface?
+- **`ocr_cer`**: Character error rate of the expected text as an OCR model reads it off the output (0 = every character is there, 1 = none). Expected text: `text:` on the check or on the input; without one, the text read off the input, so the check asks whether the copy survived. Text around it does not count (see `ocr_extra_text`).
+- **`ocr_extra_text`**: Words an OCR model reads in the output that are neither in the input nor in the expected `text:`: taglines, credits or gibberish nobody asked for. The words are listed next to the count.
 - **`phase_correlation`**: How far did the product move? Phase correlation between input and output product masks.
 - **`seam_jump`**: Visible compositing: brightness step across a region's border, minus the step already in the input.
 - **`sharpness_laplacian`**: Laplacian variance inside a region, relative to the input (1.0 = as sharp).

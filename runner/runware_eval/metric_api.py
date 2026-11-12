@@ -50,6 +50,11 @@ A metric file is a small Python module with:
                                 with `t` (seconds), `rgb` (float, at the input's size) and `mask` (the product's
                                 outline in that frame, bool, or None when the run bought none)
     video_outlines(pair)        the same, but raises KeyError ('not run') unless every sample has its outline
+    ocr(pair, side, region)     the text a local OCR model reads off the input ("in") or the output ("out"), inside
+                                a region if one is named: a list of {"text", "conf", "box"} in reading order
+    squash(text), text_distance(needle, haystack)
+                                a text without spaces and case, and the fewest edits that turn some stretch of
+                                `haystack` into `needle`: how the OCR checks compare what was read with what was expected
     series(values, fps)         per-frame values as [[seconds, value], ...]: return it as `series` and the
                                 report draws the measurement over time
 `opt` is the metric's entry in bench.yaml (region, thresholds and any options it defines).
@@ -66,7 +71,64 @@ from .text import answer, reasoning, unfence, words
 __all__ = ["np", "cv2", "rgb2lab", "deltaE_ciede2000", "structural_similarity", "erode", "mesh_value", "video",
            "out_mask", "video_flow", "media", "text", "text_meta", "words", "alpha", "native_out", "svg_value",
            "outline", "own_outline", "original", "plain_resize", "text_part", "answer", "reasoning", "unfence",
-           "video_samples", "video_outlines", "series"]
+           "video_samples", "video_outlines", "series", "ocr", "squash", "text_distance"]
+
+_OCR = []  # the OCR engine, loaded on first use (models ship with the runner; nothing is downloaded)
+
+
+def ocr(pair, side="out", region=None, min_conf=0.5):
+    """The text a local OCR model (RapidOCR, PP-OCR models, on the CPU) reads off the input or the output,
+    at the input's size, inside `region`'s bounding box when one is named. A list of lines in reading
+    order, each {"text", "conf" (0..1), "box" (x0, y0, x1, y1)}. Read once per picture and region.
+    It reads Latin letters, digits and Chinese; small, curved or very stylised lettering is missed, and
+    it does not keep spaces reliably: compare with `squash` and `text_distance`, not word by word."""
+    if getattr(pair, "text", None) is not None:
+        raise KeyError("a text output has no picture to read")
+    cache = pair.__dict__.setdefault("_ocr", {})
+    key = (side, region)
+    if key not in cache:
+        if not _OCR:
+            from rapidocr_onnxruntime import RapidOCR
+            _OCR.append(RapidOCR())
+        rgb = pair.rgb_in if side == "in" else pair.rgb_out
+        x0 = y0 = 0
+        if region:
+            ys, xs = np.nonzero(pair.region(region))
+            if not len(ys):
+                raise ValueError("the region is empty")
+            pad = max(8, int(0.02 * max(rgb.shape[:2])))
+            y0, x0 = max(0, ys.min() - pad), max(0, xs.min() - pad)
+            rgb = rgb[y0:ys.max() + pad, x0:xs.max() + pad]
+        img = cv2.cvtColor((np.clip(rgb, 0, 1) * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+        found, _ = _OCR[0](img)
+        lines = []
+        for box, txt, conf in found or []:
+            px, py = [p[0] for p in box], [p[1] for p in box]
+            lines.append({"text": str(txt).strip(), "conf": float(conf),
+                          "box": (int(min(px)) + x0, int(min(py)) + y0, int(max(px)) + x0, int(max(py)) + y0)})
+        h = float(np.median([l["box"][3] - l["box"][1] for l in lines])) if lines else 1.0
+        lines.sort(key=lambda l: (round((l["box"][1] + l["box"][3]) / 2 / max(h, 1.0)), l["box"][0]))
+        cache[key] = lines
+    return [l for l in cache[key] if l["conf"] >= min_conf and l["text"]]
+
+
+def squash(text, case=False):
+    """A text as the OCR checks compare it: no spaces or line breaks, lower case unless `case`."""
+    t = "".join(str(text).split())
+    return t if case else t.lower()
+
+
+def text_distance(needle, haystack):
+    """The fewest single-character edits that turn some stretch of `haystack` into `needle` (0 = it is
+    in there as written; len(needle) = nothing like it). Text before and after the stretch is free, so
+    extra text around the expected string does not count."""
+    prev = [0] * (len(haystack) + 1)
+    for i, a in enumerate(needle, 1):
+        cur = [i] + [0] * len(haystack)
+        for j, b in enumerate(haystack, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a != b))
+        prev = cur
+    return min(prev)
 
 
 def text(pair):

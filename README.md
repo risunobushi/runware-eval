@@ -6,8 +6,8 @@ metrics that measure your definition of good, and writes a `bench.yaml` you can 
 new model ships.
 
 > Status: the skill sets up the bench; the runner (`runner/`) estimates, runs, scores and reports it,
-> with pixel checks, a panel of vision-model judges, blind human labeling and calibration. OCR checks
-> are planned and show as *not run* in reports. Tested on Windows; macOS and Linux are untested.
+> with pixel checks, OCR checks, a panel of vision-model judges, blind human labeling and calibration.
+> Tested on Windows; macOS and Linux are untested.
 
 ## Install
 
@@ -26,7 +26,7 @@ In Claude Code, `/runware-eval help` explains the skill and lists the runner com
 The skill sets up the two tools it needs on first use, with no admin rights and no restart: the
 [Runware CLI](https://github.com/runware/runware-cli) (catalog, uploads, and the one sign-in:
 `runware auth login`) and [uv](https://docs.astral.sh/uv/) (runs the bench runner in its own
-environment). No MCP server is needed.
+environment).
 
 ## Use
 

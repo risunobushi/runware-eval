@@ -65,7 +65,7 @@ b2 = bench(tmp)
 check("the next load puts them on the checks", limits.attach(b2) == 3
       and b2["evaluate"]["deviation"]["metrics"][0]["max"] == first and b2["evaluate"]["deviation"]["metrics"][0]["limitFrom"])
 check("a check with a frozen limit is pass/fail and counts as a limit for its requirement",
-      score.row_mode(b2["evaluate"]["deviation"], b2["evaluate"]["deviation"]["metrics"][0]) == "gate"
+      score.row_mode(b2["evaluate"]["deviation"]["metrics"][0]) == "gate"
       and score.check({"value": first + 1}, b2["evaluate"]["deviation"]["metrics"][0]) is False
       and score.check({"value": first - 1}, b2["evaluate"]["deviation"]["metrics"][0]) is True)
 worse = {**V, "Hue": {k: [x * 3 for x in v] for k, v in V["Hue"].items()}}
@@ -80,6 +80,24 @@ check("the report can list them with their origin", [r[0] for r in limits.listed
 one = {"Shift": {"a": [0.2], "b": [0.4], "c": [5.0]}}
 got1 = limits.propose(bench(tempfile.mkdtemp()), scored(one), reg)
 check("one draw per recipe: the margin is the smallest difference alone", abs(got1["Shift"]["max"] - 2.4) < 0.01, got1)
+
+# the run that sets the limits is judged against them without being measured again
+d4 = tempfile.mkdtemp()
+b4 = {**bench(d4), "inputs": []}
+rows4 = scored(V)
+for s_ in rows4:
+    for m in s_["metrics"]:
+        m.update(mode="rank", thresholds={}, id="x")
+limits.freeze(b4, limits.propose(b4, rows4, reg), "full")
+limits.attach(b4)
+data4 = score.recheck(b4, {"scored": rows4}, d4)
+hue = {(s_["recipe"], s_["seed"]): m for s_ in data4["scored"] for m in s_["metrics"] if m["label"] == "Hue"}
+lim4 = b4["evaluate"]["deviation"]["metrics"][0]["max"]
+check("after the limits are set, the same values get their pass or fail (nothing is measured twice)",
+      hue[("flux", 1)]["pass"] is False and hue[("lazy", 1)]["pass"] is True and hue[("flux", 1)]["mode"] == "gate"
+      and hue[("flux", 1)]["thresholds"].get("max") == lim4 and os.path.exists(os.path.join(d4, "scores.json")))
+faces = [m for s_ in data4["scored"] for m in s_["metrics"] if m["label"] == "Faces"]
+check("a check that got no limit stays measured only", all(m["mode"] == "rank" and m.get("pass") is None for m in faces))
 
 print(f"\n{len(FAILED)} failed" if FAILED else "\nall passed")
 sys.exit(1 if FAILED else 0)

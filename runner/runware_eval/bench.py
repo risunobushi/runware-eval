@@ -3,7 +3,6 @@
 Placeholders in recipe params:
   $input                     the input's media URL (for a text input, .txt or .md: its content)
   $input.width / .height     input size, adjusted by the recipe's `size` block
-  $input.width_16[_max2048]  legacy form: multiple of 16, optional longest-side cap
   $seed                      the draw's number, sent as the seed (leave it out for a random seed per draw)
   $prompts.<name>            a prompt from the top-level `prompts` block
   $<name>                    URL of a top-level media entry, e.g. `lighting_ref: {path: ...}`
@@ -12,7 +11,6 @@ import hashlib
 import json
 import math
 import os
-import re
 import subprocess
 import uuid
 
@@ -138,20 +136,20 @@ def resolve(value, ctx):
         return " ".join(ctx["bench"]["prompts"][token.split(".", 1)[1]].split())
     if token.startswith("input."):
         attr = token.split(".", 1)[1]
-        m = re.fullmatch(r"(width|height)(?:_(\d+))?(?:_max(\d+))?", attr)
-        if not m:
+        if attr not in ("width", "height"):
             raise ValueError(f"Unknown placeholder {value}")
-        size = dict(ctx["recipe"].get("size", {}))
-        if m.group(2):
-            size["multiple"] = int(m.group(2))
-        if m.group(3):
-            size["maxSide"] = int(m.group(3))
-        w, h = fit(*ctx["input"]["_size"], **size)
-        return w if m.group(1) == "width" else h
+        w, h = fit(*ctx["input"]["_size"], **ctx["recipe"].get("size", {}))
+        return w if attr == "width" else h
     media = media_entries(ctx["bench"])
     if token in media:
         return media[token]["_text"] if "_text" in media[token] else media[token]["_url"]
     raise ValueError(f"Unknown placeholder {value}")
+
+
+def then_task(then, ctx):
+    """The request of a recipe's `then` step (a second task on the first output; `ctx` carries `prev`)."""
+    return {"taskType": then.get("taskType", "imageInference"), "taskUUID": str(uuid.uuid4()),
+            "model": then["model"], **resolve(then.get("params", {}), ctx), "includeCost": True}
 
 
 ROUTER = "auto"  # `model: auto`: Runware's Model Router picks the model for each request

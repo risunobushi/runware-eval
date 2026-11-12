@@ -126,9 +126,7 @@ def check_jobs(jobs, b=None):
             fake = "https://im.runware.ai/image/00000000-0000-0000-0000-000000000000.png"
             ctx = {"bench": b or {}, "input": j["_inp"], "recipe": j["_recipe"], "seed": j["seed"], "prev": fake, "mask_url": fake}
             try:
-                params = benchmod.resolve(then.get("params", {}), ctx)
-                steps.append(("then-step: ", {"taskType": then.get("taskType", "imageInference"), "taskUUID": j["task"]["taskUUID"],
-                                              "model": then["model"], **params, "includeCost": True}))
+                steps.append(("then-step: ", benchmod.then_task(then, ctx)))
             except Exception:  # noqa: BLE001  a placeholder only known at run time: the first step is still checked
                 pass
         for prefix, task in steps:
