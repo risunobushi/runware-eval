@@ -1,9 +1,12 @@
-"""Calibration and human ranking from the labels the user gave on the labeling page.
+"""The user's labels as a second opinion on the limits, and their own ranking of the recipes.
 
-- Gates: how often each check's pass/fail matched the user's good/bad, and the threshold that would
-  have matched best (balanced accuracy, so a few "bad" labels still count). Suggestions only: the
-  user decides whether bench.yaml changes.
-- Ranks: how well each rank metric orders the user's good above their bad (AUC: 0.5 = chance).
+The limits are set elsewhere: from the first full run (limits.yaml), or by the brief (bench.yaml).
+This only compares them with the labels the user gave on the labeling page, and changes nothing.
+
+- Checks with a limit: how often pass/fail matched the user's good/bad, and the limit that would
+  have matched best (balanced accuracy, so a few "bad" labels still count). A suggestion the user
+  accepts is written where the limit lives, by hand.
+- Checks without a limit: how well the value orders the user's good above their bad (AUC: 0.5 = chance).
 - Pairs: a Bradley-Terry score per recipe from "A is better / B is better / about the same".
 Writes calibration.json next to the run; the report shows it.
 """
@@ -130,22 +133,24 @@ def run(out_dir, labels_path, log=print):
 
     log(f"{out['labeled']} outputs labeled ({out['good']} good), {len(labels.get('pairs', []))} pairs.")
     if out["few_labels"]:
-        log("Few labels (or few of one kind): treat suggested thresholds as hints, not answers. "
+        log("Few labels (or few of one kind): treat suggested limits as hints, not answers. "
             "About 20 labels with at least 5 good and 5 bad make them dependable.")
     if out["gates"]:
-        log("\nChecks vs your labels (balanced agreement: 0.5 = chance, 1.0 = always agrees):")
+        log("\nLimits vs your labels (balanced agreement: 0.5 = chance, 1.0 = always agrees):")
         for g in out["gates"]:
             sug = (f" -> {g['key']}: {g['suggested']} would agree {g['agreement_suggested']:.0%}"
-                   if g["suggested"] != g["threshold_now"] else " (current threshold is already the best)")
+                   if g["suggested"] != g["threshold_now"] else " (no other limit would agree better)")
             log(f"  {g['label']:30} {g['agreement_now']:.0%} with {g['key']}: {g['threshold_now']}{sug}")
     if out["ranks"]:
-        log("\nRank metrics vs your labels (AUC: 0.5 = no better than chance):")
+        log("\nChecks without a limit vs your labels (AUC: 0.5 = no better than chance):")
         for r in out["ranks"]:
-            flag = "  <- weak, prefer the human ranking" if r["auc"] < 0.7 else ""
+            flag = "  <- weak, go by your own ranking" if r["auc"] < 0.7 else ""
             log(f"  {r['label']:30} AUC {r['auc']:.2f} on {r['n']} outputs{flag}")
     if out["human_ranking"]:
-        log("\nHuman ranking (Bradley-Terry, 1.0 = average):")
+        log("\nYour ranking (Bradley-Terry, 1.0 = average):")
         for rid, v in sorted(out["human_ranking"].items(), key=lambda x: -x[1]["score"]):
             log(f"  {rid:34} {v['score']:.2f}  ({v['wins']:g} wins in {v['games']:g})")
-    log("\nNothing in bench.yaml was changed. Apply a suggested threshold only if you agree with it.")
+    log("\nNothing was changed: labels are a second opinion on the limits, not a new source of them. "
+        "To accept a suggestion, edit the limit where it lives (limits.yaml; bench.yaml if the brief "
+        "stated it), say in its `from` line that you set it from your labels, and run `score`.")
     return out

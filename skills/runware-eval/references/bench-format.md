@@ -156,6 +156,7 @@ Bag hue:
 | change a limit | edit `max` / `min` / `abs_max` in `limits.yaml` and say why in `from`; run `score` |
 | state a limit the brief gives | write it next to the check in `bench.yaml` (`max: 2.0`); it wins over `limits.yaml` |
 | keep a check measured only | `limit: none` next to the check |
+| check a limit against your eye | label outputs in the report: it shows how often the limit agreed with you and the value that would agree better. Nothing is applied; to accept one, change it as in the first row |
 | have a limit set again from a run's results | delete its entry in `limits.yaml`; run `score --round full` |
 
 **The limits hold for the inputs they were set on.** They are one number per check, taken across all

@@ -601,7 +601,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     price = f" at <em>{usd(ab['cost'], 3)}</em> per output" if ab["cost"] is not None else ""
     missed = [k.split(":", 1)[1] for k, v in ab["verdict"].items() if not v]
     # Three things are kept apart in this report: measured values (the same for everyone), the verdict
-    # against this bench's thresholds (a judgement for this brief), and the user's own ranking from the
+    # against this bench's limits (a judgement for this brief), and the user's own ranking from the
     # labeling page (their preference). The headline names the second; "Your pick" names the third.
     place_txt = (f"average place {ab['place']:.1f} across the measurements (1.0 = best on all of them)"
                  if ab["place"] is not None else "")
@@ -702,7 +702,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
             warns.append(note(f"<strong>Control failed:</strong> {e(c['label'])}",
                               f"On an unchanged copy of {e(c['input'])}: {fmtv(c['value'])}, "
                               f"{'failed' if c['expected_pass'] else 'passed'} (expected "
-                              f"{'pass' if c['expected_pass'] else 'fail'}). Check or threshold does not fit this bench.", True))
+                              f"{'pass' if c['expected_pass'] else 'fail'}). Check or limit does not fit this bench.", True))
         failed = {}  # the same failure on several seeds is one line
         for x in errors:
             failed.setdefault((x["recipe"], x["input"], str(x.get("error"))), []).append(x)
@@ -797,7 +797,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     out.append("<section>" + sec_head(
                "Standings",
                "Every measurement counts. Recipes are sorted by <strong>failed checks</strong> (a measurement with a "
-               "limit in <span class='mono'>bench.yaml</span>: this brief's judgement, which can be changed), then by "
+               "limit: set from this bench's first full run and kept in <span class='mono'>limits.yaml</span>, or stated by "
+               "the brief in <span class='mono'>bench.yaml</span>; a judgement for this brief, which can be changed), then by "
                "<strong>average place</strong> (place 1 = best on a measurement; places are averaged inside each "
                "dimension, then across dimensions, so a dimension counts once however many measurements it has), "
                "then by cost. "
@@ -928,7 +929,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         for m in s["metrics"]:
             if m["label"] not in labels:
                 labels.append(m["label"])
-    out.append("<section>" + sec_head("All measurements", "The measured values, before any threshold: the same "
+    out.append("<section>" + sec_head("All measurements", "The measured values, before any limit: the same "
                                       "for every user and every re-run of the same outputs.") + "<details><summary>Show table</summary><div class='tablewrap' "
                "style='margin-top:12px'><table><thead><tr><th>Input</th><th>Recipe</th><th>Draw</th><th>Native</th>"
                "<th>Cost</th><th title='Seconds from request to result'>Speed</th>" + "".join(f"<th>{e(l)}</th>" for l in labels) + "</tr></thead><tbody>")

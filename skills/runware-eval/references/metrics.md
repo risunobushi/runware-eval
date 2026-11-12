@@ -96,7 +96,7 @@ distance from the wanted range, not the raw drop.
 | `vlm_rubric` | judge | judge | brief | runware_vlm | 1–5, higher | no limit |
 
 Aesthetics is the user's call: the user labels outputs good or bad, blind, in the report, and
-compares pairs. `calibrate` shows how often each check agreed with them (AUC for measurements without a
+compares pairs. `calibrate` shows how often each limit agreed with them (AUC for measurements without a
 limit) and turns the pair choices into the user's own ranking of the recipes (Bradley-Terry). Below an
 AUC of about 0.7, go by that ranking instead of the measurement. About 20 labels (at least 5 good, 5
 bad) make the figures dependable.
@@ -182,8 +182,8 @@ Limits to say out loud: the product checks read five frames, not every frame, so
 and goes between them is only caught by the frame-wide checks. A product that turns shows other
 sides: its outline, area and colours change honestly, so limits for an orbit must be loose and the
 judges carry "is it the same product". Lettering in later frames has no pixel check (the logo moves):
-ask the judges. Thresholds for the video checks come from synthetic clips; calibrate them on a labeled
-run. `video: { masks: false }` in bench.yaml skips the outlines; the product checks then show as not run.
+ask the judges. Limits for the video checks are set from the first full run like any other; check them against your
+labels. `video: { masks: false }` in bench.yaml skips the outlines; the product checks then show as not run.
 
 ## Upscaled pictures (`upscale`)
 
@@ -198,7 +198,7 @@ gain anything?").
 | `upscale_truth_ssim` | SSIM, higher | needs ground truth: give each input an `original:` (the full-size picture) and use that picture shrunk as the input. Compares the result with the original at the original's size, and reports what a plain resize scores (`plain_resize`, `over_plain_resize`). The only check that tells recovered detail from invented detail |
 | `upscale_truth_psnr` | dB, higher | the same comparison as pixel error. Stricter than SSIM about texture that is sharp but not the original's |
 | `size_aspect`, `phase_correlation` | | run these first. Seen on Runware: a 1366x1800 input came back as 2688x3584 from two upscalers (the input is cut to a multiple of 64 before upscaling), which fails both and drags every fidelity value down |
-| `ssim_region`, `deltaE2000_region` | | fidelity at the input's size, inside a region. Upscalers that redraw texture lower SSIM without changing what the product is: calibrate the limit on a labeled run |
+| `ssim_region`, `deltaE2000_region` | | fidelity at the input's size, inside a region. Upscalers that redraw texture lower SSIM without changing what the product is: check the limit against your labels |
 
 Ground truth is the baseline to build an upscale bench on: take full-size pictures of the kind you will
 upscale, shrink them by the factor under test (`original:` on the input points at the full-size one),

@@ -74,13 +74,13 @@ requirement, the agent writes one for the bench.
 The report keeps three things apart. **Measured values** are the same for every user and every re-run.
 The **verdict** ("best against this brief's checks": fewest failed checks, then best average place on
 the measurements, then lowest cost, with the
-checks it still misses named) depends on the thresholds in `bench.yaml`, which are a judgement for one
-brief. **Your pick** appears once you have labeled outputs: it is your preference, shown beside
+checks it still misses named) depends on the bench's limits (see **Limits** below), which are a judgement
+for one brief. **Your pick** appears once you have labeled outputs: it is your preference, shown beside
 the verdict and never applied to the bench. When the two disagree, the report says so.
 
 **Labeling is in the report.** Under "Your labels" you mark outputs good or bad and pick the better of
 random pairs, with recipe names hidden. Labels stay in your browser; agreement with each check, the
-threshold that would agree best and your own ranking are computed in the page as you click. "Export
+limit that would agree best and your own ranking are computed in the page as you click. "Export
 labels.json" hands them to `runware-eval calibrate` or to a colleague, who can import them.
 
 **Draws.** Each recipe runs `draws` times on each input (3 by default, 1 in the smoke round). No seed
@@ -88,13 +88,16 @@ is sent unless a recipe asks for one, so every draw is a new generation on the m
 whether or not the model has a seed field. A check passes when it passes on most draws. Draws that come
 back as the very same file are called out in the report.
 
-**Limits.** Nobody types thresholds. A yes/no requirement is a question to the judges and passes when most
+**Limits.** There is one place a limit comes from, and nobody types it. A yes/no requirement is a question to the judges and passes when most
 say yes. A numeric check gets its limit from the bench's first full run: the median of the recipes' results,
 moved towards "worse" by the larger of the spread between draws and the metric's smallest difference that
 counts. There is no "nothing changed" baseline to hold a model to (encoding and decoding a picture already
 changes it, and a closed model's round trip cannot be measured), so the typical result of real models is
-the baseline. The limits are frozen in `limits.yaml` with a line on where each came from; the report lists
-them, and the agent changes one when asked.
+the baseline. The limits are frozen in `limits.yaml` with a line on where each came from, and the report lists
+them. Two things can change one, both on your word. A number the brief states ("under 2 seconds") is written
+next to the check in `bench.yaml` and wins. Your labels are a second opinion: the report and `calibrate`
+show how often each limit agreed with your eye and the value that would agree better, and apply nothing;
+if you accept one, the agent writes it to `limits.yaml` and notes that it came from you.
 
 **Parameter check.** Runware runs and bills a request that carries a field it does not know, at the model's
 default. So before `estimate` and `run`, one request per recipe is validated against the model's published

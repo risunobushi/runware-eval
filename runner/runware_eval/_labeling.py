@@ -1,7 +1,7 @@
 """Labeling inside the report: markup, styles and the page script.
 
 The report is a static file, so everything here runs in the reader's browser: labels are kept in the
-browser's local storage (per run), and agreement with the checks, suggested thresholds and the
+browser's local storage (per run), and agreement with the limits, suggested limits and the
 pairwise ranking are computed in the page. `Export labels.json` writes the same format that
 `runware-eval calibrate --labels` reads, for when the labels should reach the bench or a colleague.
 
@@ -165,19 +165,19 @@ function calibrate(cal, labels, pairs){
     const c = calibrate(D.cal, S.labels, Object.values(S.pairs)), box = $('lab-result');
     let h = '';
     if (c.labeled || np){
-      h += `<p class="ink2">Your preference, set against this brief's thresholds: it informs your choice and changes nothing for other users. `
+      h += `<p class="ink2">Your labels are a second opinion on this bench's limits: they inform your choice and change nothing. `
          + `${c.labeled} outputs labeled (${c.good} good). Balanced agreement: 50% = chance. `
          + (c.few_labels ? 'Few labels (about 20, with at least 5 good and 5 bad, make suggestions dependable): treat them as hints. ' : '')
-         + `Suggestions are not applied to <span class="mono">bench.yaml</span>.</p>`;
+         + `To accept a suggested limit, ask your agent to write it to <span class="mono">limits.yaml</span>.</p>`;
     }
     if (c.gates.length){
-      h += '<div class="tablewrap"><table><thead><tr><th>Check</th><th>Threshold</th><th>Agrees with you</th><th>Suggested</th><th>Would agree</th></tr></thead><tbody>'
+      h += '<div class="tablewrap"><table><thead><tr><th>Check</th><th>Limit</th><th>Agrees with you</th><th>Suggested</th><th>Would agree</th></tr></thead><tbody>'
         + c.gates.map(g => `<tr><td>${esc(g.label)}</td><td class="mono">${esc(g.key)}: ${f(g.threshold_now)}</td><td class="mono">${pct(g.agreement_now)}</td>`
             + `<td class="mono">${g.suggested !== g.threshold_now ? f(g.suggested) : '—'}</td><td class="mono">${pct(g.agreement_suggested)}</td></tr>`).join('')
         + '</tbody></table></div>';
     }
     if (c.ranks.length){
-      h += '<div class="tablewrap"><table><thead><tr><th>Rank metric</th><th>Orders your good above your bad (AUC)</th></tr></thead><tbody>'
+      h += '<div class="tablewrap"><table><thead><tr><th>Check without a limit</th><th>Orders your good above your bad (AUC)</th></tr></thead><tbody>'
         + c.ranks.map(r => `<tr><td>${esc(r.label)}</td><td class="mono">${r.auc.toFixed(2)}${r.auc < .7 ? ' · weak' : ''}</td></tr>`).join('') + '</tbody></table></div>';
     }
     const hr = Object.entries(c.human_ranking).sort((a, b) => b[1].score - a[1].score);
@@ -197,7 +197,7 @@ function calibrate(cal, labels, pairs){
                    pa.cost !== null ? '$' + pa.cost.toFixed(3) + ' per output' : ''].filter(Boolean).join(', ');
     const verdict = pick === D.best ? 'the same recipe the standings favour'
       : `${stand}. Your eye and this brief's standings disagree: read the measurements below before choosing`;
-    line.innerHTML = `<strong>Your pick: ${esc(pick)}</strong> (${wins}), ${verdict}. Your labels are your preference, not a threshold for anyone else.`;
+    line.innerHTML = `<strong>Your pick: ${esc(pick)}</strong> (${wins}), ${verdict}. Your labels are your preference, not a limit for anyone else.`;
     $('pick-big').textContent = `${+pv.wins.toFixed(1)}/${+pv.games.toFixed(1)} won`;
     $('pick-foot').textContent = `${pick} · ${pa.model}`;
   }

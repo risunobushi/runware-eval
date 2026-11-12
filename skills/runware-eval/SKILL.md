@@ -49,7 +49,7 @@ tell from a read-only check.
 > | `estimate` | cost per recipe, each recipe's parameters checked against its model's schema, and models that changed since the last run; before anything is paid |
 > | `run --round smoke` or `--round full` | generate, score and report |
 > | `score`, `report` | re-score or rebuild the report from saved results; no login needed |
-> | `calibrate --labels <file>` | take labels exported from the report: agreement and suggested thresholds |
+> | `calibrate --labels <file>` | take labels exported from the report: how often each limit agreed with them, and the limit that would agree better |
 > | `label` | a separate blind labeling page covering every draw |
 > | `metrics list`, `metrics plan` or `metrics control` | the metrics this bench can use; the table of this bench's checks for the user to choose from; test them on unchanged inputs |
 > | `recipes list` or `recipes extract` | recipe files and their past runs |
@@ -266,6 +266,9 @@ Then load `references/metrics.md` for how to choose among existing metrics, and 
      set, another product line), make a new bench folder for them, do not reuse `limits.yaml`, and report
      the measurements next to the pass counts (see "Limits set from the first full run" in
      `references/bench-format.md`).
+   - The user's labels (Step 5) are a second opinion on these limits, not another source of them: they
+     show how often a limit agreed with the user's eye and the value that would agree better. Nothing
+     applies a suggestion; one the user accepts is changed in `limits.yaml` as above.
    - Yes/no judge checks need none of this: they pass or fail from the first run.
    - The smoke round sets no limits (one draw, one input): look at its outputs for broken recipes,
      not at pass and fail.
@@ -298,7 +301,7 @@ unchanged output must fail) or `info`. Then:
 
 1. Show the user the code and get a yes: metric files run on their machine.
 2. Run `runware-eval metrics control bench.yaml`. It scores every input against an unchanged copy of
-   itself; a control that goes the wrong way means the metric or its threshold is broken. For a
+   itself; a control that goes the wrong way means the metric or its limit is broken. For a
    metric that compares with a reference image, also check by hand that the reference scores as a
    match and an unrelated image does not.
 3. Never edit the runner's library to add a bench-specific metric.
@@ -410,17 +413,20 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
 5. **Calibrate against the user's eye** (after the smoke round, and again after the full run). The
    report has the labeling built in: under "Your labels" the user marks outputs good or bad and picks
    the better of random pairs, with recipe names hidden. The page keeps the labels in their browser
-   and shows at once how often each check agreed with them, the threshold that would agree best, which
-   rank metrics order their good above their bad, and their own ranking (Bradley-Terry), with "Your
-   pick" next to the headline. No command is needed for that. You cannot see labels that live in
+   and shows at once how often each limit agreed with them, the limit that would agree best, which
+   checks without a limit order their good above their bad, and their own ranking (Bradley-Terry), with
+   "Your pick" next to the headline. After the smoke round there are no limits set from results yet, so
+   only the last two appear. No command is needed for that. You cannot see labels that live in
    their browser: to act on them, ask the user to press "Export labels.json" and run
    `runware-eval calibrate bench.yaml --round <r> --labels <file>`, which prints the same analysis
    and stores the labels with the run, so the rebuilt report opens with them. Show the suggestions;
-   change `bench.yaml` only with the user's yes. Below about 20 labels, call the suggestions hints.
+   change a limit only with the user's yes, and where it lives: its value in `limits.yaml` (in
+   `bench.yaml` only if the brief stated it), with a `from` line saying the user set it from their
+   labels, then `score` again. Below about 20 labels, call the suggestions hints.
    The report shows and offers for labeling each recipe's best draw (the one that fails the fewest
    checks); `runware-eval label` still builds a separate page that covers every draw.
    Keep the three layers apart when you report: measured values are shared evidence; pass or fail
-   is this brief's thresholds; labels and rankings are this user's preference. The report shows
+   is this bench's limits; labels and rankings are this user's preference. The report shows
    "Your pick" beside "Best against this brief's checks"; when they disagree, say so and do not
    pick one for the user.
 
