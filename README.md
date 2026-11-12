@@ -4,6 +4,8 @@
 bench you can run again: your inputs, a set of recipes (model, settings, prompt, mask) and the checks
 that measure your definition of good.
 
+![The top of a bench report: the closest recipe, how many checks it passes, and what it still misses](docs/report-top.png)
+
 It is a skill for coding agents plus a Python runner. You describe what you are making. The agent
 finds the candidate models, turns your brief into checks and writes a `bench.yaml`. The runner
 generates under a budget cap, scores every output and hands you one HTML report.
@@ -278,6 +280,7 @@ runner/
   runware_eval/metrics_lib/   the metric library, one file per metric
   tests/                      ten test files sharing tests/harness.py
 examples/metrics/             four metrics written for one relighting bench
+docs/                         the screenshot in this README
 .claude-plugin/               the Claude Code plugin manifest
 ```
 
