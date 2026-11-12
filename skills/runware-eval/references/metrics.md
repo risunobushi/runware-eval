@@ -158,7 +158,7 @@ has a value per frame over time, one line per recipe.
 
 | id | unit | notes |
 |---|---|---|
-| `video_motion` | % of diagonal / s | mean optical flow; a still clip scores about 0. `min` rejects clips that barely move, `max` ones that move too much |
+| `video_motion` | % of diagonal / s | mean optical flow; a still clip scores about 0. How much, not how good: it does not place recipes. Its limit is the metric's own (under 0.5 a clip reads as a still), not the median; a clip that fails it did not do the task and is listed last. State `min` or `max` in the bench when the brief asks for more or less movement |
 | `video_scene_hold` | histogram distance | largest change in the picture's colour make-up within half a second: a cut or a swapped set scores high, motion inside one scene low (real clips: 0.02-0.19 held, 0.60-0.85 swapped) |
 | `video_frozen_frames` | share of clip | how much of the clip does not change at all; also the longest frozen stretch and when the picture first moves |
 | `video_texture_stability` | L* residual | what is left after moving each frame onto the next along the measured motion: boiling or morphing surfaces score high. Cuts and newly revealed sides raise it too, so read it next to `video_scene_hold` |

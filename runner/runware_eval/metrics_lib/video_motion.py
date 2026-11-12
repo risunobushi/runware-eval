@@ -1,4 +1,4 @@
-"""How much moves in a video: mean optical flow, in percent of the frame diagonal per second. A still clip scores about 0."""
+"""How much moves in a video: mean optical flow, in percent of the frame diagonal per second. A still clip scores about 0. It says how much motion there is, not how good it is, so more is not better and it does not place recipes. Its limit is its own: under 0.5 a clip reads as a still. A bench whose brief asks for more (or less) movement states `min` or `max`."""
 from runware_eval.metric_api import *  # noqa: F401,F403
 
 META = {
@@ -8,8 +8,10 @@ META = {
     'kind': 'change',
     'needs': ['video'],
     'unit': '% of diagonal / s',
-    'direction': 'higher',
-    'description': 'How much moves in a video: mean optical flow, in percent of the frame diagonal per second. A still clip scores about 0.',
+    'direction': '',  # how much, not how good: no place, and no limit from the other recipes' results
+    'limit': {'min': 0.5},  # the metric's own: what separates a clip that moves from a still
+    'limit_from': 'under 0.5 % of the frame diagonal per second a clip reads as a still',
+    'description': 'How much moves in a video: mean optical flow, in percent of the frame diagonal per second. A still clip scores about 0. It says how much motion there is, not how good it is, so more is not better and it does not place recipes. Its limit is its own: under 0.5 a clip reads as a still. A bench whose brief asks for more (or less) movement states `min` or `max`.',
 }
 
 

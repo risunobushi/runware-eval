@@ -149,7 +149,7 @@ def row_mode(opt):
 
 
 NOT_LIMITS = ("id", "label", "region", "on", "judges", "questions", "rubric", "scale", "terms", "banned", "keys",
-              "pattern", "case", "field", "strict", "min_share", "edge_pct", "limit", "limitFrom", "text", "min_conf")
+              "pattern", "case", "field", "strict", "min_share", "edge_pct", "limit", "limitFrom", "text", "min_conf", "kind")
 
 
 def thresholds(opt):
@@ -278,7 +278,7 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
                 if pending is None:
                     rows.append({**row, "status": "not_run", "note": "vision judges switched off"})
                 else:
-                    row = {**row, "status": "pending"}
+                    row = {**row, "status": "pending", "kind": opt.get("kind")}
                     rows.append(row)
                     pending.append((row, p, opt))
                 continue
@@ -288,7 +288,7 @@ def score_pair(b, p, pending=None, recipe=None, reg=None):
                              "note": f"no metric file '{opt["id"]}' in the library or the bench's metrics/"})
                 continue
             fn = m["compute"]
-            row.update(metric_fp=m["fp"], metric_source=m["source"])
+            row.update(metric_fp=m["fp"], metric_source=m["source"], kind=opt.get("kind") or m["meta"].get("kind"))
             if p.no_picture and m["meta"].get("family") != "vector":
                 rows.append({**row, "status": "not_run", "note": f"the SVG could not be rendered: {p.no_picture}"})
                 continue

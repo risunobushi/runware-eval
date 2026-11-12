@@ -72,7 +72,7 @@ the bench is visible instead of silently missing from the standings. When no sto
 requirement, the agent writes one for the bench.
 
 The report keeps three things apart. **Measured values** are the same for every user and every re-run.
-The **verdict** ("best against this brief's checks": fewest failed checks, then best average place on
+The **verdict** ("best against this brief's checks": recipes that did not do the task last, then fewest failed checks, then best average place on
 the measurements, then lowest cost, with the
 checks it still misses named) depends on the bench's limits (see **Limits** below), which are a judgement
 for one brief. **Your pick** appears once you have labeled outputs: it is your preference, shown beside

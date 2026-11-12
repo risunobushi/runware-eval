@@ -99,5 +99,17 @@ check("after the limits are set, the same values get their pass or fail (nothing
 faces = [m for s_ in data4["scored"] for m in s_["metrics"] if m["label"] == "Faces"]
 check("a check that got no limit stays measured only", all(m["mode"] == "rank" and m.get("pass") is None for m in faces))
 
+# a metric with a natural "nothing happened" states its own limit: the other recipes do not move it
+b5 = {"_dir": tempfile.mkdtemp(), "evaluate": {"motion": {"metrics": [{"id": "video_motion", "label": "Motion"}]}}}
+own = limits.propose(b5, scored({"Motion": {"still": [0.1], "slow": [1.3], "fast": [2.9]}}), reg)
+check("video_motion gets its own limit, not the median of the recipes",
+      own.get("Motion", {}).get("min") == 0.5 and "own limit" in own["Motion"]["from"], own)
+
+# a limit is rounded towards "worse", so a recipe sitting exactly on it never fails by rounding
+check("a floor is rounded down and a ceiling up",
+      limits._round(1.6406002, "higher") == 1.640 and limits._round(1.6406002, "lower") == 1.641
+      and limits._round(0.25, "higher") == 0.25 and limits._round(0.0, "lower") == 0.0
+      and limits._round(-1.23456, "higher") <= -1.23456 <= limits._round(-1.23456, "lower"))
+
 print(f"\n{len(FAILED)} failed" if FAILED else "\nall passed")
 sys.exit(1 if FAILED else 0)

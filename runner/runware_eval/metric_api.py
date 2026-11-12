@@ -7,7 +7,9 @@ A metric file is a small Python module with:
         "family": "colorimetric",     # used to pick cross-checks from a different family
         "trust": "deterministic",     # deterministic | learned | judge | human
         "kind": "preserve",           # preserve: an unchanged output must pass
-                                      # change:   an unchanged output must fail (the task asks for change)
+                                      # change:   an unchanged output must fail (the task asks for change).
+                                      #           A recipe that fails such a check did not do the task and is
+                                      #           listed last in the report, whatever else it passes.
                                       # info:     no pass/fail meaning on its own
         "needs": ["reference", "region"],
         "unit": "ΔE", "direction": "lower",   # lower | higher | closer_to_zero

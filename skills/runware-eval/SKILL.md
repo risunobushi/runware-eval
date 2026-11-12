@@ -242,7 +242,8 @@ Then load `references/metrics.md` for how to choose among existing metrics, and 
    becomes the ranking that counts.
 6. **Limits and places both always count; the user does not choose a mode.** Do not write `mode:`
    in `bench.yaml`. A metric with a limit next to it (`min`, `max`, `mean_max`, ...) is a pass/fail
-   check; a metric without one is only measured. The report sorts recipes by failed checks, then by
+   check; a metric without one is only measured. The report lists last the recipes that fail a check
+   on the task itself (a metric of kind `change`, or a check marked `kind: change`), then sorts by failed checks, then by
    average place across the dimensions (place 1 = best on a measurement, averaged inside each
    dimension, then across dimensions), then by cost. So:
    - **Do not invent limits for numeric checks, and do not ask the user for them.** Write the check
@@ -297,7 +298,12 @@ all, drop some, or ask for others. Then:
 recipes) and `tolerance`, the smallest difference in this metric's unit that anyone would care about
 (2 px, 1 L*, 0.02 of an overlap): it is the least margin a limit set from results will have. Set `kind`
 honestly: `preserve` (an unchanged output must pass), `change` (the task asks for change, so an
-unchanged output must fail) or `info`. Then:
+unchanged output must fail) or `info`. `change` matters twice: a recipe that fails such a check did not
+do the task, and the report lists it last whatever else it passes (doing nothing keeps the product
+perfectly intact). A yes/no judge question that asks whether the task was done gets `kind: change` next
+to it in `bench.yaml` for the same reason. A metric whose value has a natural "nothing happened" (a still
+clip moves about 0) states its own limit in `META` (`limit: {min: ...}`, `limit_from: "why"`), so the
+other recipes' results do not move it. Then:
 
 1. Show the user the code and get a yes: metric files run on their machine.
 2. Run `runware-eval metrics control bench.yaml`. It scores every input against an unchanged copy of

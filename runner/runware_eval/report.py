@@ -225,7 +225,7 @@ def gate_rows(item, every=False):
         val = fmtv(v.get("value")) + (f" · p95 {fmtv(v['p95'])}" if "p95" in v and "p95_max" in m["thresholds"] else "")
         out.append({"key": f"{m['dimension']}:{m['label']}", "dimension": m["dimension"], "label": m["label"],
                     "value": val if m["status"] == "ok" else m["status"].replace("_", " "),
-                    "gate": m["mode"] == "gate",
+                    "gate": m["mode"] == "gate", "task": m.get("kind") == "change",
                     "pass": m.get("pass") if m["status"] == "ok" and m["mode"] == "gate" else None})
     return out
 
@@ -489,8 +489,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     rule = b.get("passRule", "majority")
     agg = {}
     for s in scored:
-        a = agg.setdefault(s["recipe"], {"items": [], "costs": [], "lat": [], "by_check": {}})
+        a = agg.setdefault(s["recipe"], {"items": [], "costs": [], "lat": [], "by_check": {}, "task": set()})
         for g in gate_rows(s):
+            if g["task"]:
+                a["task"].add(g["key"])
             if g["pass"] is not None:
                 a["by_check"].setdefault(g["key"], {}).setdefault(s["input"], []).append(g["pass"])
         a["items"].append(s)
@@ -501,15 +503,18 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     for rid, a in agg.items():
         a["verdict"] = {k: all(seed_verdict(v, rule) for v in by_in.values()) for k, by_in in a["by_check"].items()}
         a["fails"] = sum(1 for v in a["verdict"].values() if not v)
+        # checks on the task itself (an unchanged output must fail them): failing one means the brief was not done
+        a["undone"] = [k.split(":", 1)[1] for k, v in a["verdict"].items() if not v and k in a["task"]]
         a["checks"] = len(a["verdict"])
         a["cost"] = float(np.mean(a["costs"])) if a["costs"] else listed.get(rid)
         a["cost_src"] = "measured" if a["costs"] else "listed"
         a["latency"] = float(np.mean(a["lat"])) if a["lat"] else None
-    # Standings: failed checks first, then average place on the measurements, then cost. Limits and
-    # places both always count; a bench without limits is ordered by place alone.
+    # Standings: recipes that did not do the task come last, whatever else they pass (doing nothing keeps
+    # everything else intact). Then failed checks, then average place on the measurements, then cost.
+    # Limits and places both always count; a bench without limits is ordered by place alone.
     cols, direction, placed = place_recipes(b, scored, agg)
     any_checks = any(a["checks"] for a in agg.values())
-    order = sorted(agg, key=lambda r: (agg[r]["fails"], agg[r]["place"] if agg[r]["place"] is not None else 1e9,
+    order = sorted(agg, key=lambda r: (bool(agg[r]["undone"]), agg[r]["fails"], agg[r]["place"] if agg[r]["place"] is not None else 1e9,
                                        agg[r]["cost"] if agg[r]["cost"] is not None else 9))
     passing = [r for r in order if agg[r]["fails"] == 0 and agg[r]["checks"] > 0]
     measured = sum(sum(a["costs"]) for a in agg.values())
@@ -609,6 +614,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         headline = (f"Best on this brief's measurements: <em>{e(best)}</em>.<br><span class='sub'>"
                     + (f"{place_txt[:1].upper()}{place_txt[1:]}{price}. " if place_txt else f"Measured{price}. " if price else "")
                     + "No pass/fail limits are set.</span>")
+    elif ab["undone"]:
+        headline = (f"No recipe did what the brief asks.<br><span class='sub'>Closest: <em>{e(best)}</em>, which passes "
+                    f"{ab['checks'] - ab['fails']} of {ab['checks']} checks{price} but misses the task itself: "
+                    f"{e(', '.join(ab['undone']))}.</span>")
     elif passing:
         headline = f"Best against this brief's checks: <em>{e(best)}</em>.<br><span class='sub'>Passes every check{price}.</span>"
     else:
@@ -796,7 +805,9 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     unplaced = [c["label"] for c in cols if c["key"] not in placed]
     out.append("<section>" + sec_head(
                "Standings",
-               "Every measurement counts. Recipes are sorted by <strong>failed checks</strong> (a measurement with a "
+               "Every measurement counts. Recipes that fail a check on <strong>the task itself</strong> (one an unchanged "
+               "output must fail) come last, whatever else they pass: an output that does nothing keeps everything else "
+               "intact. The rest are sorted by <strong>failed checks</strong> (a measurement with a "
                "limit: set from this bench's first full run and kept in <span class='mono'>limits.yaml</span>, or stated by "
                "the brief in <span class='mono'>bench.yaml</span>; a judgement for this brief, which can be changed), then by "
                "<strong>average place</strong> (place 1 = best on a measurement; places are averaged inside each "
@@ -836,6 +847,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         cost = usd(a["cost"]) + ("" if a["cost_src"] == "measured" else "*") if a["cost"] is not None else "—"
         lat = f"{a['latency']:.0f}s" if a["latency"] else "—"
         failed = f"{a['fails']} of {a['checks']}" if a["checks"] else "—"
+        if a["undone"]:
+            failed += f"<div class='strip' title='{e(', '.join(a['undone']))}'>task not done</div>"
         by_dim = " · ".join(f"{d.replace('_', ' ')} {p:.1f}" for d, p in a["place_by_dim"].items())
         place = f"<span title='{e(by_dim)}'>{a['place']:.1f}</span>" if a["place"] is not None else "—"
         out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' class='linkish'>{e(rid)}</button><div class='strip'>"

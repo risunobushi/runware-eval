@@ -56,7 +56,7 @@ metric's file and regenerate. This is the curated library; a bench can add its o
 | `video_flicker` | info | video | deterministic | video | L* lower | library | `35ed4afa` |
 | `video_frozen_frames` | info | video | deterministic | video | share of clip lower | library | `c42d4319` |
 | `video_letterbox` | info | video | deterministic | video | share of frame lower | library | `d2625500` |
-| `video_motion` | change | video | deterministic | video | % of diagonal / s higher | library | `8bcfb71f` |
+| `video_motion` | change | video | deterministic | video | % of diagonal / s  | library | `3476f647` |
 | `video_outline_hold` | preserve | video | deterministic | video, reference, region | IoU higher | library | `7f8c500f` |
 | `video_product_area` | info | video | deterministic | video, reference, region | × input area  | library | `fa17950f` |
 | `video_product_drift` | preserve | video | deterministic | video, reference, region | histogram distance lower | library | `132606d8` |
@@ -115,7 +115,7 @@ metric's file and regenerate. This is the curated library; a bench can add its o
 - **`video_flicker`**: Brightness flicker in a video: frame-to-frame jumps in lightness that a smooth change would not have.
 - **`video_frozen_frames`**: Share of a video in which the picture does not change at all (0 = always changing, 1 = a still image).
 - **`video_letterbox`**: Black bars in a video: share of the frame taken by bars that stay black for the whole clip (0 = none).
-- **`video_motion`**: How much moves in a video: mean optical flow, in percent of the frame diagonal per second. A still clip scores about 0.
+- **`video_motion`**: How much moves in a video: mean optical flow, in percent of the frame diagonal per second. A still clip scores about 0. It says how much motion there is, not how good it is, so more is not better and it does not place recipes. Its limit is its own: under 0.5 a clip reads as a still. A bench whose brief asks for more (or less) movement states `min` or `max`.
 - **`video_outline_hold`**: Does the product keep its outline through a video? Lowest overlap (IoU) between its outline in the sample frames and in the input.
 - **`video_product_area`**: Does the product stay in the picture? Its smallest area in the sample frames of a video, relative to its area in the input (1.0 = same size).
 - **`video_product_drift`**: Is it still the same product later in the video? Largest change in the colour make-up of the product, frame outline against the input's (0 = same colours, 1 = nothing in common).

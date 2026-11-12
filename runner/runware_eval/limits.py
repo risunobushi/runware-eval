@@ -19,6 +19,7 @@ them, so a recipe added later is held to the same line. A limit in bench.yaml al
 on a check keeps it measured only. To change a limit, edit `limits.yaml` or put the limit in bench.yaml;
 to have them set again from the results in a run folder, delete the entry (or the file) and score again.
 """
+import math
 import os
 import time
 
@@ -82,12 +83,31 @@ def _num(x):
     return f"{x:.3g}"
 
 
+def _round(limit, way):
+    """Four significant digits, rounded towards "worse": a recipe that sits exactly on the limit (the
+    typical one, when the margin is zero) must not fail by rounding."""
+    r = float(f"{limit:.4g}")
+    if r == limit or limit == 0:
+        return r
+    step = 10.0 ** (math.floor(math.log10(abs(limit))) - 3)
+    if way == "higher" and r > limit:
+        r -= step
+    elif way != "higher" and r < limit:
+        r += step
+    return float(f"{r:.4g}")
+
+
 def propose(b, scored, reg):
     """A limit for every open numeric check, from scored outputs: {label: {max|min|abs_max, from, ...}}.
     Needs at least two recipes with a value; a check with fewer gets none."""
     out = {}
     for name, opt in _checks(b):
         if not _open(opt):
+            continue
+        own = ((reg.get(opt["id"]) or {}).get("meta") or {}).get("limit")
+        if own:  # the metric states its own limit (what "nothing happened" reads as): results do not move it
+            meta = reg[opt["id"]]["meta"]
+            out[name] = {**own, "from": "the metric's own limit: " + meta.get("limit_from", "stated in its file")}
             continue
         way, tol = direction(opt, reg)
         if way not in KEY:
@@ -107,7 +127,7 @@ def propose(b, scored, reg):
         spread = float(np.median(ranges)) if ranges else 0.0
         margin = max(spread, tol)
         limit = centre - margin if way == "higher" else centre + margin
-        limit = float(f"{limit:.4g}")
+        limit = _round(limit, way)
         why = (f"median of {len(per)} recipes ({_num(centre)}) {'minus' if way == 'higher' else 'plus'} {_num(margin)}: "
                + (f"the spread between draws ({_num(spread)})" if spread >= tol and ranges
                   else f"the metric's smallest difference that counts ({_num(tol)})" if tol
