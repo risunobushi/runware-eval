@@ -7,7 +7,8 @@ new model ships.
 
 > Status: the skill sets up the bench; the runner (`runner/`) estimates, runs, scores and reports it,
 > with pixel checks, OCR checks, a panel of vision-model judges, blind human labeling and calibration.
-> Tested on Windows; macOS and Linux are untested.
+> Benches were run on Windows. Setup was tested on a clean macOS machine (2026-11-12): the agent installed the
+> Runware CLI and uv, and uv built the runner's environment. Linux is untested.
 
 ## Install
 
