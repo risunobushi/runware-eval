@@ -99,6 +99,10 @@ next to the check in `bench.yaml` and wins. Your labels are a second opinion: th
 show how often each limit agreed with your eye and the value that would agree better, and apply nothing;
 if you accept one, the agent writes it to `limits.yaml` and notes that it came from you.
 
+**How long it takes.** Generation runs in parallel and is as fast as the models. Scoring reads every
+output at full size: a small bench is scored in seconds to a couple of minutes, 100 or more outputs at
+2048 px in tens of minutes.
+
 **Parameter check.** Runware runs and bills a request that carries a field it does not know, at the model's
 default. So before `estimate` and `run`, one request per recipe is validated against the model's published
 schema. A field the model does not have (`widht`, with "did you mean `width`?"), a value outside the allowed

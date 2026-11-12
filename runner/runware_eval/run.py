@@ -154,6 +154,29 @@ def mask_from(url, path, model=None):
     return res.get("cost") or 0.0
 
 
+def boxes_from(url, path, model):
+    """A region made by one of Runware's detectors (`imageMasking`: faces, hands, people, parts of a
+    face): the box around each thing it found, filled. A box is enough to compare the same area before
+    and after, and it does not depend on how tightly the detector draws its mask."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    res = api.run_task({"taskType": "imageMasking", "taskUUID": str(uuid.uuid4()), "model": model,
+                        "inputs": {"image": url}, "outputFormat": "PNG", "includeCost": True})
+    if res["status"] != "success":
+        raise RuntimeError(f"Detection failed: {res.get('error')}")
+    api.download(res["maskImageURL"], path + ".raw.png")
+    found = (np.asarray(Image.open(path + ".raw.png").convert("L")) > 127).astype(np.uint8)
+    os.remove(path + ".raw.png")
+    n, _, stats, _ = cv2.connectedComponentsWithStats(found, connectivity=8)
+    boxes = np.zeros(found.shape, np.uint8)
+    for x, y, w, h, area in stats[1:n]:
+        if area >= 16:  # specks are not detections
+            boxes[y:y + h, x:x + w] = 255
+    if not boxes.any():
+        raise RuntimeError(f"{model} found nothing in this input: give the region as a box or a mask file instead")
+    Image.fromarray(boxes).save(path)
+    return res.get("cost") or 0.0
+
+
 def outline(row, source, out_dir):
     """Buy the product outline of an output (`source`: its URL or a data URI) for the outline checks.
     The cost goes on the row; a failure is noted and never loses the paid output."""
@@ -521,13 +544,13 @@ def execute(jobs, out_dir, maxSpend, workers=6, log=print, history_dirs=(), b=No
 
 
 def prepare_offline(b, out_dir):
-    """For commands that only read results (score, report, label, calibrate, metric controls): no uploads.
-    `auto:` masks are taken from the run folder; only a missing one needs a Runware login to generate."""
+    """For commands that only read results (score, report, calibrate, metric controls): no uploads.
+    `auto:` and `detect:` regions are taken from the run folder; only a missing one needs a Runware login."""
     missing = []
     for inp in b["inputs"]:
         name = os.path.splitext(os.path.basename(inp["path"]))[0]
         for rname, spec in (inp.get("regions") or {}).items():
-            if isinstance(spec, str) and spec.startswith("auto:"):
+            if isinstance(spec, str) and spec.startswith(("auto:", "detect:")):
                 target = os.path.join(out_dir, "masks", f"{name}_{rname}.png")
                 if os.path.exists(target):
                     inp["regions"][rname] = os.path.abspath(target)
@@ -544,13 +567,19 @@ def prepare_offline(b, out_dir):
 
 
 def ensure_input_masks(b, out_dir):
-    """Resolve `regions.<name>: auto:<AIR>` into mask files once."""
+    """Resolve `regions.<name>: auto:<AIR>` (an outline from a background remover) and
+    `detect:<AIR>` (boxes from a detector) into mask files once."""
     for inp in b["inputs"]:
         for name, spec in (inp.get("regions") or {}).items():
-            if isinstance(spec, str) and spec.startswith("auto:"):
+            if isinstance(spec, str) and spec.startswith(("auto:", "detect:")):
                 target = os.path.join(out_dir, "masks", f"{os.path.splitext(os.path.basename(inp['path']))[0]}_{name}.png")
                 if not os.path.exists(target):
-                    mask_from(inp["_url"], target, spec[len("auto:"):].strip() or None)
+                    if spec.startswith("detect:"):
+                        if not spec[len("detect:"):].strip():
+                            raise ValueError(f"Region '{name}': `detect:` needs a detector's AIR, e.g. detect:runware:35@2 (faces)")
+                        boxes_from(inp["_url"], target, spec[len("detect:"):].strip())
+                    else:
+                        mask_from(inp["_url"], target, spec[len("auto:"):].strip() or None)
                 inp["regions"][name] = os.path.abspath(target)  # absolute: out_dir may be on another drive
 
 

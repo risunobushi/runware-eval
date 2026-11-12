@@ -607,7 +607,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
     missed = [k.split(":", 1)[1] for k, v in ab["verdict"].items() if not v]
     # Three things are kept apart in this report: measured values (the same for everyone), the verdict
     # against this bench's limits (a judgement for this brief), and the user's own ranking from the
-    # labeling page (their preference). The headline names the second; "Your pick" names the third.
+    # labels in this report (their preference). The headline names the second; "Your pick" names the third.
     place_txt = (f"average place {ab['place']:.1f} across the measurements (1.0 = best on all of them)"
                  if ab["place"] is not None else "")
     if not any_checks:

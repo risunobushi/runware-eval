@@ -1,7 +1,7 @@
 """The user's labels as a second opinion on the limits, and their own ranking of the recipes.
 
 The limits are set elsewhere: from the first full run (limits.yaml), or by the brief (bench.yaml).
-This only compares them with the labels the user gave on the labeling page, and changes nothing.
+This only compares them with the labels the user gave in the report, and changes nothing.
 
 - Checks with a limit: how often pass/fail matched the user's good/bad, and the limit that would
   have matched best (balanced accuracy, so a few "bad" labels still count). A suggestion the user

@@ -1,4 +1,4 @@
-"""Styles for the HTML report and the labeling page, on Runware's brand tokens (runware.ai, Nov 2026):
+"""Styles for the HTML report, on Runware's brand tokens (runware.ai, Nov 2026):
 dark ground, white type, green-to-yellow as light, Figtree for text, JetBrains Mono for ids and numbers.
 Runware's heading face (Coxx) is not public, so headings use Figtree as runware.ai's own fallback does."""
 

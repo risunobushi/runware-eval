@@ -11,7 +11,7 @@ later means adding one recipe and re-running. Results are cached by a hash of
 | `goal` | The user's goal in their own words. |
 | `task` | Optional. One short sentence shown under the report's headline as "Task: ...". Without it the report uses the first sentence of `goal`. |
 | `inputs` | Files or URLs. Each may carry its own `regions` (masks or boxes) and expected `text` (the copy the OCR checks look for). A `.txt` or `.md` file is a text input; `reference`, `terms` and `banned` are per-input facts for the text checks (see "Task types"). |
-| `regions` | Named masks: a file path, or `auto:<model AIR>` to generate one on Runware (e.g. BiRefNet). |
+| `regions` | Named areas of an input: a mask file, a box (`{ box: [x0, y0, x1, y1] }`), `auto:<AIR>` for the subject's outline from a background remover on Runware (plain `auto:` is BiRefNet General), or `detect:<AIR>` for the boxes one of Runware's detectors finds (`detect:runware:35@2` faces, `runware:35@3` hands, `runware:35@5` people; about 0.0006 USD, made once). A box is enough to compare the same area before and after. If the detector finds nothing the run stops and says so. |
 | `evaluate` | The dimensions the user chose. Per dimension: `metrics` (ids from `metrics.md`). A metric with a limit (`min`, `max`, `max_px`, `abs_max`, `mean_max`, `p95_max`, `dL_min`, `dL_max`, `aspect_tolerance`) is a pass/fail check; one without is measured only. Both count in the report: recipes that fail a check on the task itself (a metric of kind `change`, or a check with `kind: change`) are listed last; the rest are sorted by failed checks, then by average place on the measurements, then by cost. Numeric checks are written without a limit: the first full run sets it (see "Limits set from the first full run"). |
 | `requirements` | What the brief asks, one entry per requirement: `need` (the user's words) and `checks` (labels of the metrics that answer it). `run` stops on a requirement nothing measures (unless it carries `notMeasured: "<why>"`, the user's choice) and warns about one that has no limit; the report lists them. Example: `- { need: "The scene is the reference background", checks: ["Background match", "In the scene (judges)"] }` |
 | `budget` | `maxSpend`: the most one full run may spend, in USD. The runner refuses to start above it. Not the Model Router's `maxPrice`, which is a ceiling for one request. |
@@ -162,9 +162,11 @@ Bag hue:
 **The limits hold for the inputs they were set on.** They are one number per check, taken across all
 inputs, and many measurements depend on the input (how much light can move to the left half of a tall thin
 vase is not what it is for a kettle). Limits frozen on five products rejected 94 of 100 good outputs on
-fifteen other products; on a bench of very different recipes they came out too loose to fail anything. For
-new inputs, start a new bench folder (its own `limits.yaml`) and read the measurements, not only the pass
-counts. Setting limits per input is planned.
+fifteen other products; on a bench of very different recipes they came out too loose to fail anything. Whether
+one limit fits all the inputs is a judgement about the task, and it is the agent's to make: inputs of one
+kind (the same product line, shot the same way) share a bench; inputs that differ in what a good result
+looks like get a bench folder each (its own `limits.yaml`). For inputs added later, start a new folder and
+read the measurements, not only the pass counts.
 
 Not set: on a smoke round, on a run narrowed with `--inputs` or `--recipes`, for a check with fewer than
 two recipes, and for a metric whose META has no `direction`. With one draw per recipe the margin is the

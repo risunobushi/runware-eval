@@ -3,6 +3,7 @@ name = "runware-eval"
 version = "0.1.0"
 description = "Run, score and report a runware-eval bench.yaml on Runware."
 requires-python = ">=3.12,<3.13"
+license = "MIT"
 dependencies = [
   "numpy",
   "pillow",

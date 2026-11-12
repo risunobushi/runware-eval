@@ -87,6 +87,13 @@ def model_checks(a, b, out, jobs, paying):
     return {air: s["fp"] for air, s in today.items()}
 
 
+def slow_note(n):
+    """Scoring reads every output at full size, one after the other: say so before a large run."""
+    if n >= 40:
+        print(f"{n} outputs to score. A few outputs take seconds to a couple of minutes; a run this size can take "
+              "tens of minutes to score at 2048 px, and the report a few more. Nothing is paid while it works.")
+
+
 def cmd_estimate(a):
     b, out = setup(a)
     bench.ensure_media(b, os.path.join(out, "media.lock.json"))
@@ -109,6 +116,7 @@ def cmd_estimate(a):
     cap = bench.maxSpend(b)
     print(f"\n{len(rows)} tasks, about ${total:.3f}" + (f" (cap ${cap:.2f})" if cap else "")
           + ". Masks for scoring add a small amount per output.")
+    slow_note(len(rows))
     print("Measured costs come from earlier runs of this bench; otherwise the recipe's own price note, else the "
           "model's highest listed price. Runware has no reliable dry-run, so a smoke round is the way to measure.")
 
@@ -136,7 +144,9 @@ def cmd_score(a, b=None, out=None, results=None):
     if b is None:
         b, out = setup(a)
         run.prepare_offline(b, out)
-    data = score.score_all(b, out, results if results is not None else run.read_results(out),
+    results = results if results is not None else run.read_results(out)
+    slow_note(len(results))
+    data = score.score_all(b, out, results,
                            judges=not getattr(a, "no_judges", False),
                            maxSpend=bench.maxSpend(b))
     if a.round == "full" and not a.inputs and not a.recipes:
@@ -161,15 +171,6 @@ def cmd_report(a, b=None, out=None):
     notes = json.load(open(a.notes, encoding="utf8")) if getattr(a, "notes", None) else None
     listed = {r["id"]: api.recipe_price(r) for r in b["recipes"]}
     print("Report →", report.build(b, out, notes, listed))
-
-
-def cmd_label(a):
-    from . import label
-    b, out = setup(a)
-    path, n, p = label.build(b, out, pairs_per_recipe=a.pairs_per_recipe)
-    print(f"Labeling page: {path}  ({n} outputs, {p} pairs, blind and shuffled)")
-    print("Open it, label what you can, press 'Download labels.json', then run:")
-    print(f"  runware-eval calibrate {a.bench} --round {a.round} --labels <path to labels.json>")
 
 
 def cmd_calibrate(a):
@@ -261,13 +262,9 @@ def main():
         if name in ("run", "score"):
             p.add_argument("--no-judges", action="store_true", help="skip the vision-model checks")
         p.set_defaults(fn=fn)
-    lp = sub.add_parser("label", help="make a blind labeling page (good/bad and pairwise) for a scored run")
-    common(lp)
-    lp.add_argument("--pairs-per-recipe", type=int, default=4)
-    lp.set_defaults(fn=cmd_label)
-    cp = sub.add_parser("calibrate", help="read labels.json: agreement per check, suggested thresholds, human ranking")
+    cp = sub.add_parser("calibrate", help="read labels.json: how often each limit agreed with the labels, suggested limits, the user's ranking")
     common(cp)
-    cp.add_argument("--labels", required=True, help="the labels.json downloaded from the labeling page")
+    cp.add_argument("--labels", required=True, help="the labels.json exported from the report")
     cp.add_argument("--notes")
     cp.set_defaults(fn=cmd_calibrate)
     mp = sub.add_parser("metrics", help="list metrics (library + bench), show this bench's checks for the user to choose from (plan), run the controls, or print the registry")

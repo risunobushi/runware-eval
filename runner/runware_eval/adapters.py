@@ -1,7 +1,7 @@
 """Adapters for outputs that are not a plain picture: cut-outs, masks, vector files and text.
 
 Like the 3D and video adapters, each one makes its output look like something the rest of the runner
-already knows: a picture at the input's shape (what the report, the labeling page and the image
+already knows: a picture at the input's shape (what the report and the image
 checks use), a mask where the output has an outline of its own, and the facts only that kind of
 output has.
 

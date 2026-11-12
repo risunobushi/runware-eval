@@ -50,7 +50,6 @@ tell from a read-only check.
 > | `run --round smoke` or `--round full` | generate, score and report |
 > | `score`, `report` | re-score or rebuild the report from saved results; no login needed |
 > | `calibrate --labels <file>` | take labels exported from the report: how often each limit agreed with them, and the limit that would agree better |
-> | `label` | a separate blind labeling page covering every draw |
 > | `metrics list`, `metrics plan` or `metrics control` | the metrics this bench can use; the table of this bench's checks for the user to choose from; test them on unchanged inputs |
 > | `recipes list` or `recipes extract` | recipe files and their past runs |
 >
@@ -166,7 +165,8 @@ it is how users discover dimensions they had not thought of.
 
    Cost, speed and failure rate are always measured. Say so.
 3. **Follow-ups only for the chosen dimensions**: which region must stay fixed (do they have masks,
-   or should the bench generate them), expected text, reference identity. Do not ask the user to
+   or should the bench make them: `auto:` outlines the subject, `detect:` boxes faces, hands or people
+   with one of Runware's detectors, see `references/bench-format.md`), expected text, reference identity. Do not ask the user to
    choose between "gate" and "rank", and do not use those words with them: every measurement counts
    in the report either way (see Step 2, point 6).
 4. **Budget and size:** the most one full run may spend, in USD (`budget.maxSpend` in `bench.yaml`),
@@ -263,9 +263,12 @@ Then load `references/metrics.md` for how to choose among existing metrics, and 
      one changed, edit its value in `limits.yaml`, add to its `from` line that the user set it and
      why, and run `score` again. Limits never move by themselves after that, so recipes added later
      are held to the same line.
-   - The frozen limits hold for the inputs they were set on. When the user brings new inputs (a held-out
-     set, another product line), make a new bench folder for them, do not reuse `limits.yaml`, and report
-     the measurements next to the pass counts (see "Limits set from the first full run" in
+   - A limit is one number per check, across all inputs. Whether that fits is your call, from the task:
+     inputs of one kind share a bench; when a good result looks different from input to input (a tall
+     vase and a kettle under the same light), give each kind its own bench folder, so each gets its own
+     limits. The frozen limits hold for the inputs they were set on: when the user brings new inputs (a
+     held-out set, another product line), make a new bench folder for them, do not reuse `limits.yaml`,
+     and report the measurements next to the pass counts (see "Limits set from the first full run" in
      `references/bench-format.md`).
    - The user's labels (Step 5) are a second opinion on these limits, not another source of them: they
      show how often a limit agreed with the user's eye and the value that would agree better. Nothing
@@ -372,7 +375,7 @@ agent, and adding a model must mean adding one recipe file.
 
 ## Step 5 — Cost, smoke round, full run, report
 
-Commands that only read results (`score`, `report`, `label`, `calibrate`, `metrics control`) need no
+Commands that only read results (`score`, `report`, `calibrate`, `metrics control`) need no
 Runware login: anyone with the run folder can re-score it and rebuild its report; vision judges then
 use their cached answers. And the report itself is one HTML file anyone can open in a browser.
 
@@ -387,6 +390,9 @@ environment on first use (about a minute) and reuses it afterwards:
 use `uvx --from "git+https://github.com/risunobushi/runware-eval#subdirectory=runner" runware-eval …`
 instead. The runner signs in with the CLI login.
 Every command takes `--out <folder>`; results there are cached, so nothing is ever paid for twice.
+Scoring reads every output at full size: a few outputs take seconds to a couple of minutes, 100 or more
+at 2048 px take tens of minutes, and the report a few more. Tell the user before a large run, and run it
+in the background.
 
 1. **Estimate:** `uv run --project <runner> runware-eval estimate bench.yaml --round smoke`. Costs are *measured* averages from
    earlier runs in that folder, otherwise the highest *listed* price in the model's schema. Runware has
@@ -430,7 +436,7 @@ Every command takes `--out <folder>`; results there are cached, so nothing is ev
    `bench.yaml` only if the brief stated it), with a `from` line saying the user set it from their
    labels, then `score` again. Below about 20 labels, call the suggestions hints.
    The report shows and offers for labeling each recipe's best draw (the one that fails the fewest
-   checks); `runware-eval label` still builds a separate page that covers every draw.
+   checks): a recipe is shown at what it can do, not at its unlucky draw.
    Keep the three layers apart when you report: measured values are shared evidence; pass or fail
    is this bench's limits; labels and rankings are this user's preference. The report shows
    "Your pick" beside "Best against this brief's checks"; when they disagree, say so and do not
@@ -501,6 +507,20 @@ pass/fail limits are set" means Step 2, point 6 was skipped.
 
 ## Related skills
 
-`runware-models` (catalog lookup), `runware-run` (execution contract), `edit-image`,
-`product-photography`, `character-consistency`, `text-in-image` (the outcomes this bench evaluates),
-and the `migrate` skills (use a bench to prove a migrated recipe did not regress).
+From Runware's skills (`Runware/runware-skills`), by name:
+
+- **Building a bench**: `runware-models` (finding models and reading schemas), `runware-run` (how a
+  request is made), `runware-prompting` (prompts per model family, for the recipes).
+- **Outcomes this bench can compare**, with the skill that makes one of each:
+  - images: `edit-image`, `product-photography`, `photoreal-stills`, `character-consistency`,
+    `text-in-image`, `composite-scene`, `controlled-generation`
+  - video from a picture: `animate-image`, `product-ad-video`, `cinematic-video`
+  - 3D: `image-to-3d-asset`
+  - tools: `restore-and-upscale` (upscaling), `logos-and-vectors` (vector files),
+    `vision-understanding` (captions), `llm-agent` (text)
+  - your own model: `bring-your-own-model` and `train-style-model` (a Serverless endpoint is a recipe type)
+- **Not covered**: audio, music, voice and video-to-video outcomes (`voiceover`, `music`, `edit-video`, ...).
+- **Migrations**: `fal-to-runware`, `replicate-to-runware`, `wavespeed-to-runware` and
+  `integrate-with-runware`. Run the same bench before and after to show a migrated recipe did not regress.
+
+Use an outcome skill for a one-off result, this skill when the choice of model has to be shown.

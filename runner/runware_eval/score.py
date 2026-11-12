@@ -55,7 +55,7 @@ def input_region(b, inp, spec):
         r = np.zeros((H, W), bool)
         r[y0:y1, x0:x1] = True
         return r
-    if isinstance(v, str) and not v.startswith("auto:"):
+    if isinstance(v, str) and not v.startswith(("auto:", "detect:")):
         return load_mask(os.path.join(b["_dir"], v), (W, H))
     raise KeyError(f"Region '{spec}' is not defined for {inp['path']}")
 
@@ -86,7 +86,7 @@ class Pair:
         regions = inp.get("regions") or {}
         self.boxes = {k: v["box"] for k, v in regions.items() if isinstance(v, dict) and "box" in v}
         self.masks_in = {k: load_mask(os.path.join(b["_dir"], v), (self.W, self.H))
-                         for k, v in regions.items() if isinstance(v, str) and not v.startswith("auto:")}
+                         for k, v in regions.items() if isinstance(v, str) and not v.startswith(("auto:", "detect:"))}
         self.m_out = load_mask(out_mask_path, (self.W, self.H)) if out_mask_path else None
         self.mesh = self.video = self.svg = self.text = None
         self.text_meta, self.alpha_file, self.no_picture = {}, None, None
@@ -319,7 +319,7 @@ def controls(b, reg):
         if textmod.is_text(src):
             continue  # no unchanged copy of a text input can stand in for an output
         prod = (inp.get("regions") or {}).get("product")
-        mask = os.path.join(b["_dir"], prod) if isinstance(prod, str) and not prod.startswith("auto:") else None
+        mask = os.path.join(b["_dir"], prod) if isinstance(prod, str) and not prod.startswith(("auto:", "detect:")) else None
         p = Pair(b, inp, src, mask)
         for dim, spec in (b.get("evaluate") or {}).items():
             for opt in spec.get("metrics", []):

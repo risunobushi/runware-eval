@@ -14,7 +14,7 @@ import numpy as np
 import yaml
 from PIL import Image
 
-from runware_eval import adapters, bench, judge, label, report, run, score
+from runware_eval import adapters, bench, judge, report, run, score
 
 ok = True
 
@@ -214,7 +214,6 @@ p.text = ANSWERS["cap-good"]["text"]
 images, intro, subject = judge.prepare(p, {}, b)
 check("caption: judges get the input picture and the text, and are asked about the text",
       len(images) == 1 and ANSWERS["cap-good"]["text"] in intro and subject == "the TEXT")
-check("labeling page builds for text outputs", os.path.exists(label.build(b, out)[0]))
 
 # ---- textInference: text in, text out
 b, out, jobs, rows, data, got, html = go(
