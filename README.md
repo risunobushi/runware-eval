@@ -69,8 +69,9 @@ Cost, speed and failure rate are measured on every run.
 - [uv](https://docs.astral.sh/uv/): runs the runner in its own environment on a pinned Python 3.12,
   which uv downloads if it is missing. Nothing is installed into your Python.
 
-**Platforms.** Benches were run on Windows. Setup was tested on a clean macOS machine (2026-11-12): the
-agent installed the Runware CLI and uv, and uv built the runner's environment. Linux is untested.
+**Platforms.** Tested and working on Windows, macOS and Linux: setup on a clean machine (the agent
+installs the Runware CLI and uv, and uv builds the runner's environment), the plugin install, the
+`uvx` line and bench runs.
 
 ## Use
 
