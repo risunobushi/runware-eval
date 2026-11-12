@@ -234,6 +234,9 @@ def plan(b, reg):
             elif not limit and opt.get("limit") != "none" and opt.get("id") not in YES_NO and (
                     opt.get("id") == "vlm_rubric" or (m.get("meta") or {}).get("direction")):
                 limit = "worse than the typical recipe (set from the first full run)"
+            own = (m.get("meta") or {}).get("limit")
+            if not limit and own and opt.get("limit") != "none":  # the metric states its own limit
+                limit = ", ".join(f"{k} {v}" for k, v in own.items()) + " (the metric's own, applied from the first full run)"
             if not limit and opt.get("id") in YES_NO:
                 limit = "yes on every question"
             rows.append({"label": label(opt), "id": opt["id"], "dimension": dim,

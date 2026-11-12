@@ -1,20 +1,12 @@
 """Limits for numeric checks, set from a run's results and frozen in limits.yaml."""
 import os
-import sys
 import tempfile
 
 import yaml
 
 from runware_eval import catalog, limits, score
 
-FAILED = []
-
-
-def check(name, cond, extra=""):
-    print(("ok   " if cond else "FAIL ") + name + (f"  {extra}" if extra and not cond else ""))
-    if not cond:
-        FAILED.append(name)
-
+from harness import check, finish
 
 def bench(d, extra=None):
     return {"_dir": d, "evaluate": {
@@ -111,5 +103,4 @@ check("a floor is rounded down and a ceiling up",
       and limits._round(0.25, "higher") == 0.25 and limits._round(0.0, "lower") == 0.0
       and limits._round(-1.23456, "higher") <= -1.23456 <= limits._round(-1.23456, "lower"))
 
-print(f"\n{len(FAILED)} failed" if FAILED else "\nall passed")
-sys.exit(1 if FAILED else 0)
+finish()

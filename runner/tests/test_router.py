@@ -1,18 +1,12 @@
 """Offline tests of `model: auto` recipes (Runware's Model Router): the request, the cache key per
 seed, the price estimate, the recorded pick and the report rows. The Runware API is replaced by fakes."""
 import os
-import sys
 import tempfile
 
 from runware_eval import api, bench, recipes, report, run
 
-ok = True
+from harness import check, finish
 
-
-def check(name, cond, extra=""):
-    global ok
-    ok &= bool(cond)
-    print(("PASS " if cond else "FAIL ") + name, extra)
 
 
 def make_bench(router):
@@ -107,4 +101,4 @@ check("report: section says how often the router chose the best recipe's model",
       "chose that model on 1 of 3 calls" in html and "2 different models" in html)
 check("report: no section without router recipes", report.router_section([], agg, order, {}, "two", None) == "")
 
-sys.exit(0 if ok else 1)
+finish()

@@ -4,7 +4,6 @@ Run: uv run --project runner python runner/tests/test_video.py
 """
 import json
 import os
-import sys
 import tempfile
 
 import cv2
@@ -15,13 +14,8 @@ from PIL import Image
 
 from runware_eval import bench, report, score
 
-ok = True
+from harness import check, finish
 
-
-def check(name, cond, extra=""):
-    global ok
-    ok &= bool(cond)
-    print(("PASS " if cond else "FAIL ") + name, extra)
 
 
 # a textured "product" on a plain backdrop, 480x640
@@ -175,5 +169,4 @@ check("report: frame strips embedded", "First, middle and last frame" in html)
 check("report: headline names the clean clip", "Best against this brief's checks: <em>pan</em>" in html, html[html.index("<h1>"):html.index("</h1>")][:120])
 print(f"   report {os.path.getsize(path) / 1e6:.1f} MB at {path}")
 
-print("ALL PASS" if ok else "SOME FAILED")
-sys.exit(0 if ok else 1)
+finish()

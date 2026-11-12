@@ -505,16 +505,18 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         a["fails"] = sum(1 for v in a["verdict"].values() if not v)
         # checks on the task itself (an unchanged output must fail them): failing one means the brief was not done
         a["undone"] = [k.split(":", 1)[1] for k, v in a["verdict"].items() if not v and k in a["task"]]
+        a["undone_inputs"] = len({i for k in a["task"] for i, v in a["by_check"].get(k, {}).items()
+                                  if not seed_verdict(v, rule)})
         a["checks"] = len(a["verdict"])
         a["cost"] = float(np.mean(a["costs"])) if a["costs"] else listed.get(rid)
         a["cost_src"] = "measured" if a["costs"] else "listed"
         a["latency"] = float(np.mean(a["lat"])) if a["lat"] else None
     # Standings: recipes that did not do the task come last, whatever else they pass (doing nothing keeps
-    # everything else intact). Then failed checks, then average place on the measurements, then cost.
+    # everything else intact); with several inputs, the fewer inputs it was missed on, the higher. Then failed checks, then average place on the measurements, then cost.
     # Limits and places both always count; a bench without limits is ordered by place alone.
     cols, direction, placed = place_recipes(b, scored, agg)
     any_checks = any(a["checks"] for a in agg.values())
-    order = sorted(agg, key=lambda r: (bool(agg[r]["undone"]), agg[r]["fails"], agg[r]["place"] if agg[r]["place"] is not None else 1e9,
+    order = sorted(agg, key=lambda r: (agg[r]["undone_inputs"], agg[r]["fails"], agg[r]["place"] if agg[r]["place"] is not None else 1e9,
                                        agg[r]["cost"] if agg[r]["cost"] is not None else 9))
     passing = [r for r in order if agg[r]["fails"] == 0 and agg[r]["checks"] > 0]
     measured = sum(sum(a["costs"]) for a in agg.values())
@@ -615,9 +617,10 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                     + (f"{place_txt[:1].upper()}{place_txt[1:]}{price}. " if place_txt else f"Measured{price}. " if price else "")
                     + "No pass/fail limits are set.</span>")
     elif ab["undone"]:
-        headline = (f"No recipe did what the brief asks.<br><span class='sub'>Closest: <em>{e(best)}</em>, which passes "
-                    f"{ab['checks'] - ab['fails']} of {ab['checks']} checks{price} but misses the task itself: "
-                    f"{e(', '.join(ab['undone']))}.</span>")
+        headline = (f"No recipe did what the brief asks{' on every input' if len(in_order) > 1 else ''}.<br><span class='sub'>Closest: <em>{e(best)}</em>, which passes "
+                    f"{ab['checks'] - ab['fails']} of {ab['checks']} checks{price} but misses the task itself"
+                    + (f" on {ab['undone_inputs']} of {len(in_order)} inputs" if len(in_order) > 1 else "")
+                    + f": {e(', '.join(ab['undone']))}.</span>")
     elif passing:
         headline = f"Best against this brief's checks: <em>{e(best)}</em>.<br><span class='sub'>Passes every check{price}.</span>"
     else:
@@ -807,7 +810,7 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
                "Standings",
                "Every measurement counts. Recipes that fail a check on <strong>the task itself</strong> (one an unchanged "
                "output must fail) come last, whatever else they pass: an output that does nothing keeps everything else "
-               "intact. The rest are sorted by <strong>failed checks</strong> (a measurement with a "
+               "intact. With several inputs, a recipe that missed the task on fewer of them stands higher. The rest are sorted by <strong>failed checks</strong> (a measurement with a "
                "limit: set from this bench's first full run and kept in <span class='mono'>limits.yaml</span>, or stated by "
                "the brief in <span class='mono'>bench.yaml</span>; a judgement for this brief, which can be changed), then by "
                "<strong>average place</strong> (place 1 = best on a measurement; places are averaged inside each "
@@ -848,7 +851,8 @@ def build(b, out_dir, notes=None, listed=None, out_path=None):
         lat = f"{a['latency']:.0f}s" if a["latency"] else "—"
         failed = f"{a['fails']} of {a['checks']}" if a["checks"] else "—"
         if a["undone"]:
-            failed += f"<div class='strip' title='{e(', '.join(a['undone']))}'>task not done</div>"
+            on = f" on {a['undone_inputs']} of {len(in_order)} inputs" if len(in_order) > 1 else ""
+            failed += f"<div class='strip' title='{e(', '.join(a['undone']))}'>task not done{on}</div>"
         by_dim = " · ".join(f"{d.replace('_', ' ')} {p:.1f}" for d, p in a["place_by_dim"].items())
         place = f"<span title='{e(by_dim)}'>{a['place']:.1f}</span>" if a["place"] is not None else "—"
         out.append(f"<tr><td class='rank'>{n}</td><td><button data-id='{e(rid)}' class='linkish'>{e(rid)}</button><div class='strip'>"

@@ -1,5 +1,4 @@
 """The OCR checks: the expected copy is read off the output, and words nobody asked for are counted."""
-import sys
 from types import SimpleNamespace
 
 import cv2
@@ -8,14 +7,7 @@ import numpy as np
 from runware_eval import catalog
 from runware_eval.metric_api import squash, text_distance
 
-FAILED = []
-
-
-def check(name, cond, extra=""):
-    print(("ok   " if cond else "FAIL ") + name + (f"  {extra}" if extra and not cond else ""))
-    if not cond:
-        FAILED.append(name)
-
+from harness import check, finish
 
 def card(*lines):
     """Black lettering on white, one (text, y, scale) per line."""
@@ -66,5 +58,4 @@ check("words of the expected text are not extra", extra(pair(logo, added), {"tex
 check("both checks state a direction and a smallest difference, so the first full run can set their limit",
       all(reg[m]["meta"].get("direction") == "lower" and reg[m]["meta"].get("tolerance") for m in ("ocr_cer", "ocr_extra_text")))
 
-print(f"\n{len(FAILED)} failed" if FAILED else "\nall passed")
-sys.exit(1 if FAILED else 0)
+finish()

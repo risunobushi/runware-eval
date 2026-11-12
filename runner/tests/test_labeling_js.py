@@ -14,6 +14,8 @@ import tempfile
 
 from runware_eval import _labeling, calibrate
 
+from harness import check, finish
+
 node = shutil.which("node")
 if not node:
     print("SKIPPED: Node.js not found")
@@ -71,13 +73,6 @@ if res.returncode:
     sys.exit(1)
 jsr = json.loads(res.stdout)
 
-ok = True
-
-
-def check(name, cond, extra=""):
-    global ok
-    ok &= bool(cond)
-    print(("PASS " if cond else "FAIL ") + name, extra)
 
 
 def close(a, b):
@@ -104,5 +99,4 @@ check("pairwise ranking matches", set(py["human_ranking"]) == set(jsr["human_ran
 open(os.path.join(d, "full.js"), "w", encoding="utf8").write("const D = {};\n" + js)
 syn = subprocess.run([node, "--check", os.path.join(d, "full.js")], capture_output=True, text=True)
 check("the whole page script parses", syn.returncode == 0, syn.stderr[:300])
-print("ALL PASS" if ok else "SOME FAILED")
-sys.exit(0 if ok else 1)
+finish()

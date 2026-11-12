@@ -1,20 +1,14 @@
 """Offline tests of the budget guard and the resume logic: the Runware API is replaced by fakes."""
 import json
 import os
-import sys
 import tempfile
 import time
 
 from runware_eval import api, run
 
-ok = True
+from harness import check, finish
+
 REAL_POLL, REAL_RUN = api.poll_task, api.run_task
-
-
-def check(name, cond, extra=""):
-    global ok
-    ok &= bool(cond)
-    print(("PASS " if cond else "FAIL ") + name, extra)
 
 
 def job(i, recipe="r", est=None):
@@ -149,5 +143,4 @@ api.post = post_provider_error
 r = api.run_task({"taskType": "imageInference", "taskUUID": "t3", "model": "m"}, poll_every=0.01)
 check("run_task: provider error from polling is reported", r["status"] == "error" and "422" in r["error"])
 
-print("ALL PASS" if ok else "SOME FAILED")
-sys.exit(0 if ok else 1)
+finish()

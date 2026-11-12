@@ -1,16 +1,8 @@
 """Requirements and checks: what stops a run, yes/no judge checks, and the table the user chooses from."""
-import sys
 
 from runware_eval import catalog, score
 
-FAILED = []
-
-
-def check(name, cond, extra=""):
-    print(("ok   " if cond else "FAIL ") + name + (f"  {extra}" if extra and not cond else ""))
-    if not cond:
-        FAILED.append(name)
-
+from harness import check, finish
 
 def bench(reqs):
     return {"requirements": reqs, "evaluate": {
@@ -53,5 +45,4 @@ check("the plan says where each metric comes from and what fails it",
       and by["Structure"]["limit"].startswith("worse than the typical recipe") and by["Real photo (judges)"]["limit"] == "yes on every question"
       and by["Real photo (judges)"]["questions"] == ["Does image 2 look like a real photograph?"])
 
-print(f"\n{len(FAILED)} failed" if FAILED else "\nall passed")
-sys.exit(1 if FAILED else 0)
+finish()

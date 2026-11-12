@@ -9,7 +9,6 @@ import io
 import json
 import os
 import shutil
-import sys
 import tempfile
 
 import cv2
@@ -21,13 +20,8 @@ from PIL import Image
 from runware_eval import bench, judge, report, run, score
 from runware_eval import video as video_mod
 
-ok = True
+from harness import check, finish
 
-
-def check(name, cond, extra=""):
-    global ok
-    ok &= bool(cond)
-    print(("PASS " if cond else "FAIL ") + name, extra)
 
 
 # a textured "product" on a plain backdrop, 480x640
@@ -246,5 +240,4 @@ check("report: it speaks of draws, not seeds", "<dt>Draws</dt><dd>2</dd>" in htm
 check("report: draws that are the very same file are called out",
       "Draws that are the same output" in html and "hold on item (2 draws)" in html)
 
-print("ALL PASS" if ok else "SOME FAILED")
-sys.exit(0 if ok else 1)
+finish()

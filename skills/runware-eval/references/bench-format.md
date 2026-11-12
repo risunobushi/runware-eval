@@ -127,9 +127,21 @@ prints what changed; results carry `model_fp`, the record they were generated un
 the ones from before a change. `run --regenerate-changed` makes those again. Results from before this
 record existed carry no stamp and are not marked.
 
+## Video recipes
+
+`taskType: videoInference`. Pass the start image in `inputs.frameImages`, switch audio and prompt
+rewriting off (both are on by default on several models; audio costs more, rewriting hurts
+reproducibility), and give `price` in USD per output: video is priced per second, so the listed price is
+not per clip. The run buys a product outline for five frames of every clip (about 0.003 USD per clip),
+which the product checks read; `video: { masks: false }` turns that off.
+
 ## Limits set from the first full run
 
-A numeric check written without a limit gets one when the first full run is scored:
+A numeric check written without a limit gets one when the first full run is scored. The reason it is
+not typed by hand: there is no "nothing changed" baseline to hold a model to. A model changes pixels just
+by encoding and decoding the picture, and nobody can measure that round trip for a closed model, so what
+real models return on this brief is the only baseline. An output fails when it is worse than the typical
+recipe by more than a re-roll explains:
 
 ```
 limit  = median of the recipes' medians, moved towards "worse" by the margin

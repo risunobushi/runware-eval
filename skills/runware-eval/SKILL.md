@@ -46,7 +46,7 @@ tell from a read-only check.
 >
 > | Command | What it does |
 > |---|---|
-> | `estimate` | cost per recipe, each recipe's parameters checked against its model's schema, and models that changed since the last run; before anything is paid |
+> | `estimate` | cost per recipe, each recipe's parameters checked against its model's schema, and models that changed since the last run; before any generation is paid |
 > | `run --round smoke` or `--round full` | generate, score and report |
 > | `score`, `report` | re-score or rebuild the report from saved results; no login needed |
 > | `calibrate --labels <file>` | take labels exported from the report: how often each limit agreed with them, and the limit that would agree better |
@@ -248,13 +248,10 @@ Then load `references/metrics.md` for how to choose among existing metrics, and 
    dimension, then across dimensions), then by cost. So:
    - **Do not invent limits for numeric checks, and do not ask the user for them.** Write the check
      without a limit. The runner sets it from the first full run and freezes it in `limits.yaml` next
-     to `bench.yaml`: the median of the recipes' results, moved towards "worse" by a margin (the larger
-     of the typical spread between draws and the metric's `tolerance`, its smallest difference that
-     counts). An output fails when it is worse than the typical recipe by more than a re-roll explains.
-     The reason: there is no "nothing changed" baseline. A model changes pixels just by encoding and
-     decoding the picture, and nobody can measure that round trip for a closed model, so what real
-     models return is the only baseline. If every recipe is poor, the typical one still passes: that
-     is the ceiling of what models can do on this brief, not a fault of the bench.
+     to `bench.yaml`: an output fails when it is worse than the typical recipe by more than a re-roll
+     explains (the rule and the reason for it: "Limits set from the first full run" in
+     `references/bench-format.md`). If every recipe is poor, the typical one still passes: that is the
+     ceiling of what models can do on this brief, not a fault of the bench.
    - Write a limit into `bench.yaml` yourself only when the brief states one ("at most 2 seconds",
      "under 0.10 USD", "exactly the input's size") or the user asks for one. A limit in `bench.yaml`
      always wins over `limits.yaml`. `limit: none` on a check keeps it measured only.
@@ -367,7 +364,8 @@ Map each recipe's parameters from its own schema. Record every convention you ha
 
 Write each recipe as its own file in `recipes/<id>.yaml` (self-contained: prompts written out, notes
 on every translated convention), and list them by id in `bench.yaml`, following
-`references/bench-format.md`. Before creating a recipe, run
+`references/bench-format.md`. Before creating a recipe, and before its id is in `bench.yaml` (the
+command stops on an id with no file), run
 `uv run --project <runner> runware-eval recipes list bench.yaml`: if a recipe for the same model and
 settings already exists in the bench's recipe folders (or a team folder in `recipeDirs`), reuse it
 instead of writing a near-duplicate. The bench is the deliverable: it must re-run later without an
@@ -397,7 +395,9 @@ in the background.
 1. **Estimate:** `uv run --project <runner> runware-eval estimate bench.yaml --round smoke`. Costs are *measured* averages from
    earlier runs in that folder, otherwise the highest *listed* price in the model's schema. Runware has
    no reliable dry-run (the `X-Runware-Dry-Run` header executed and billed in testing), so never
-   promise a free price check. Show the user the table and get a yes.
+   promise a free price check. Show the user the table and get a yes. `estimate` generates nothing, but it prepares the inputs: it
+   uploads them once and, for a region written as `auto:` or `detect:`, buys that outline (about
+   0.0006 USD each, once). Say so if the user asked for nothing to be spent yet.
    `estimate` and `run` also print two things, both read from the models' published schemas:
    - **Parameter check.** Lines marked `x` (a field the model does not have, a value it does not allow)
      stop `run` before anything is paid: fix the recipe file. Runware would have run and billed the
@@ -445,30 +445,36 @@ in the background.
 Vision-model checks run in `score` as the second stage of a funnel: only outputs that fail at most
 `judgeWhen.maxFailedChecks` pixel checks are judged, with one combined call per judge (about
 0.006 USD per judged output; cached; `--no-judges` skips them). When picking metrics in Step 2, give the
-judges only questions no pixel check can answer. 3D outputs (GLB) and video
-outputs (MP4) need nothing extra: the runner renders or reads them into images first, see the 3D and
-video sections of `references/metrics.md`. For video recipes set `taskType: videoInference`, pass the
-start image in `inputs.frameImages`, switch audio and prompt rewriting off, and give `price`
-(USD per output; video is priced per second). The run buys a product outline for five frames of every
-clip (about 0.003 USD per clip), which the product checks (`video_outline_hold`, `video_product_area`,
-`video_product_drift`) read; judges get the first, middle and last frame, so write their questions
-about "the video". Every brief that says the product must stay the same needs at least one of the
-product checks: the frame-wide video checks do not look at the product. Upscalers, background removers, masking models,
-A model the user trained or deployed on Runware Serverless is benched like any other: a recipe with
-`taskType: serverlessEndpoint` calls the app's endpoint (see "Your own model on Runware Serverless" in
-`references/bench-format.md`), so "is my fine-tune better than what I started from?" is the same bench
-with one more recipe. Keep the inputs it was trained on apart from the inputs it is tested on, and say in
-the report which is which. Upscalers, background removers, masking models,
-vectorizers, captioners and text models are benched the same way: set the recipe's `taskType`
-(`upscale`, `removeBackground`, `imageMasking`, `vectorize`, `caption`, `textInference`) and pick the
-checks from the matching section of `references/metrics.md`; what each recipe sends is in "Task types"
-in `references/bench-format.md`. Three things to settle with the user for these: a background-removal
-or masking bench needs a **reference outline** they trust for each input (ask for it, or make one and
-have them correct it; never from a model under test); a text bench needs its **inputs as text files**
-and, per input, what a good answer must contain or must not say; and text answers are **judged by text
-models**, so keep the models under test off the judge panel. Audio, prompt enhancement and ControlNet
-preprocessing are not supported yet: say so instead of improvising. A check that could not run on an
-output shows as *not run* in the report, with the reason. Say so; never present it as passed.
+judges only questions no pixel check can answer.
+
+**Outputs that are not a picture** need nothing extra from you: the runner renders or reads them into
+pictures, outlines or text first. What changes per kind:
+
+- **Video** (`taskType: videoInference`): how to write the recipe is in "Video recipes" in
+  `references/bench-format.md`, the checks in the video section of `references/metrics.md`. Every brief
+  that says the product must stay the same needs at least one of the product checks
+  (`video_outline_hold`, `video_product_area`, `video_product_drift`): the frame-wide video checks do
+  not look at the product. Judges get the first, middle and last frame, so write their questions about
+  "the video".
+- **3D** (`3dInference`): see the 3D section of `references/metrics.md`.
+- **Upscalers, background removers, masking models, vectorizers, captioners and text models**: set the
+  recipe's `taskType` (`upscale`, `removeBackground`, `imageMasking`, `vectorize`, `caption`,
+  `textInference`) and pick the checks from the matching section of `references/metrics.md`; what each
+  recipe sends is in "Task types" in `references/bench-format.md`. Three things to settle with the user:
+  a background-removal or masking bench needs a **reference outline** they trust for each input (ask
+  for it, or make one and have them correct it; never from a model under test); a text bench needs its
+  **inputs as text files** and, per input, what a good answer must contain or must not say; and text
+  answers are **judged by text models**, so keep the models under test off the judge panel.
+- **A model the user trained or deployed on Runware Serverless** is benched like any other: a recipe
+  with `taskType: serverlessEndpoint` calls the app's endpoint (see "Your own model on Runware
+  Serverless" in `references/bench-format.md`), so "is my fine-tune better than what I started from?"
+  is the same bench with one more recipe. Keep the inputs it was trained on apart from the inputs it
+  is tested on, and say in the report which is which.
+- **Not supported yet**: audio, prompt enhancement and ControlNet preprocessing. Say so instead of
+  improvising.
+
+A check that could not run on an output shows as *not run* in the report, with the reason. Say so;
+never present it as passed.
 
 **Before reporting, check the limits and the standings against the outputs.** A check that every
 recipe fails, or one that passes something visibly wrong (e.g. a hue-only backdrop check passing a

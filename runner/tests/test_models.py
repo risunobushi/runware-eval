@@ -2,19 +2,11 @@
 import copy
 import json
 import os
-import sys
 import tempfile
 
 from runware_eval import api, models, run
 
-FAILED = []
-
-
-def check(name, cond, extra=""):
-    print(("ok   " if cond else "FAIL ") + name + (f"  {extra}" if extra and not cond else ""))
-    if not cond:
-        FAILED.append(name)
-
+from harness import check, finish
 
 def doc(status="live", price=0.02, steps_default=16, extra_field=False):
     props = {
@@ -139,5 +131,4 @@ check("the outdated rows are gone from results.jsonl", len(run.read_results(out)
 res = run.execute(J, out, 1.0, log=quiet, model_fps={"test:1@1": new_fp}, regenerate=True)
 check("and a second time nothing is sent", len(sent) == 4)
 
-print(f"\n{len(FAILED)} failed" if FAILED else "\nall passed")
-sys.exit(1 if FAILED else 0)
+finish()

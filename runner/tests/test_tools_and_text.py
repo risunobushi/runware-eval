@@ -6,7 +6,6 @@ Run: uv run --project runner python runner/tests/test_tools_and_text.py
 """
 import json
 import os
-import sys
 import tempfile
 
 import cv2
@@ -16,13 +15,8 @@ from PIL import Image
 
 from runware_eval import adapters, bench, judge, report, run, score
 
-ok = True
+from harness import check, finish
 
-
-def check(name, cond, extra=""):
-    global ok
-    ok &= bool(cond)
-    print(("PASS " if cond else "FAIL ") + name, extra)
 
 
 # ---- one input: a textured disc ("the product") on a plain backdrop, 400x300, with its reference outline
@@ -345,4 +339,4 @@ check("size kept: a result that came back smaller is reported",
       metric("size_kept")(SimpleNamespace(native=(1536, 2048), W=1920, H=2560, text=None, svg=None, mesh=None, video=None), {})
       == {"value": 0.8, "native": "1536x2048"})
 
-sys.exit(0 if ok else 1)
+finish()
