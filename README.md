@@ -12,6 +12,9 @@ generates under a budget cap, scores every output and hands you one HTML report.
 /runware-eval Which model moves the key light on my product photos to the right without changing the product?
 ```
 
+Or you can just ask for the best model for X task, and your agent will pick up the skill by itself if
+it's installed.
+
 ## Contents
 
 - [What it covers](#what-it-covers)
